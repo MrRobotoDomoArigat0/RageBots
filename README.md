@@ -53,7 +53,7 @@ build from source if you want to change the mod.
 
 RageBots is installed by hand: you copy three files into the game's `x64` folder.
 
-1. Close Streets of Rage 4 (the game must not be running).
+1. Close Streets of Rage 4 (you can have steam open).
 2. Open the game's `x64` folder (the folder that contains `SOR4.exe`). By default:
    `C:\Program Files (x86)\Steam\steamapps\common\Streets of Rage 4\x64`
    Or in Steam: right-click Streets of Rage 4 > **Manage > Browse local files**, then open the `x64` folder.
