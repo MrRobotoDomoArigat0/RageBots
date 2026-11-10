@@ -1,0 +1,19 @@
+# build outputs
+build/
+*.exe
+*.o
+*.obj
+*.dll
+*.pdb
+*.bgra
+# logs and runtime files
+*.log
+*.out
+SoR4Bots.ini.bak
+*.ini.bak
+# editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
