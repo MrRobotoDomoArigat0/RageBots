@@ -2,7 +2,7 @@
 
 **By: MrRobotoDomoArigato**
 
-**AI teammates for Streets of Rage 4 (offline local play)**
+**Bot teammates for Streets of Rage 4 (offline local play)**
 
 YouTube: https://www.youtube.com/@MrRobotoDomoArigato
 
