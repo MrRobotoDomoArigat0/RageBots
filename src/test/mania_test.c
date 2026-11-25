@@ -16,6 +16,7 @@ void logf_(int lv, const char *fmt, ...) {
     va_list ap; va_start(ap, fmt); vprintf(fmt, ap); va_end(ap); putchar('\n');
 }
 int dbg_trap_zone_count(void); void dbg_trap_reset(void); void dbg_mania_pipes_reset(void);
+void dbg_surv_reset(void); void dbg_floor_set_wall(int hi, float z, float x);
 static World w; static BotBrain bb[3]; static PadOut out; static uint64_t now = 1000000;
 static int fails;
 #define CHECK(cond, ...) do { int ok_ = !!(cond); printf("%s: ", ok_ ? "OK  " : "FAIL"); printf(__VA_ARGS__); putchar('\n'); if (!ok_) fails++; } while (0)
@@ -75,6 +76,17 @@ static int g_p1dx = 0; static void move_me_toward_stick(int fr);
 /* m7.3: the far target keeps its distance (5 ahead), P1 moves along (g_p1dx ahead, 0 = stays) */
 static void wt_keep5(int fr) { move_me_toward_stick(fr); w.ch[1].pos.z = 1.5f; w.ch[2].pos.x = w.ch[1].pos.x + 5.0f; if (g_p1dx) w.ch[0].pos.x = w.ch[1].pos.x + g_p1dx * 0.5f; }
 static void move_me_toward_stick(int fr) { (void)fr; g_me->pos.x += out.axis[AX_LX] / 32767.0f * 0.08f; g_me->pos.z += out.axis[AX_LY] / 32767.0f * 0.04f; }
+static int g_pinZ, g_brkAirX, g_brkLastX;
+static void move_brk_check(int fr) {
+    (void)fr;
+    g_me->pos.x += out.axis[AX_LX] / 32767.0f * 0.08f;
+    if (!g_pinZ) g_me->pos.z += out.axis[AX_LY] / 32767.0f * 0.04f;
+    if (out.btn[BTN_X] && !g_brkLastX) {
+        if (fabsf(g_me->pos.z - w.br[0].pos.z) > 0.5f) g_brkAirX++;
+        if (fabsf(g_me->pos.z - w.br[0].pos.z) <= 0.25f && fabsf(g_me->pos.x - w.br[0].pos.x) <= 2.2f) w.br[0].life -= 1;
+    }
+    g_brkLastX = out.btn[BTN_X];
+}
 
 
 /* v1.1 (m8): offline tests of the Bot skill switch. Every scenario runs with BotSkill=0 (Easy, must do what v1.0 did:
@@ -199,7 +211,7 @@ int main(void) {
         /* 12. v1.1 stage 2: Axel, target at mid range on our lane (2.8 = 2.2 x range): Normal jumps and presses special in
            the air (Dragon Dive), then the follow-up string once it is next to the target; Easy: no air special there */
         world_reset(); bot_reset(1); me = &w.ch[1]; brain_set_character(&bb[0], 0, "Axel"); w.ps[1].playable = 0;
-        mk(2, 50, 1, -1, 2.8f, 1.5f, -1, CS_STANDWALK);
+        mk(2, 50, 1, -1, 2.8f, 1.5f, -1, CS_STANDWALK); mk(3, 51, 1, -1, 3.5f, 1.55f, 1, CS_STANDWALK);   /* v1.2: 2 in its path */
         { int aFr = -1, yFr = -1, fwdY = 0;
           for (int fr = 0; fr < 70; fr++, now += 16) { w.frames++; brain_think(&bb[0], bb, 3, &w, 1, now, &out);
               if (out.btn[BTN_A] && aFr < 0) aFr = fr;
@@ -243,7 +255,7 @@ int main(void) {
         if (sk) CHECK(dec(D_M_DIVE) == 0, "%s: life 65 with no max read: 65%%, no air special (%d)", S, dec(D_M_DIVE));
         else CHECK(!mania_any(), "%s: life 65 with no max read: no Mania decision (%d)", S, mania_any());
         world_reset(); bot_reset(1); me = &w.ch[1]; me->life = 85; me->maxLife = 0; spec_char("Axel");
-        mk(2, 50, 1, -1, 2.8f, 1.5f, -1, CS_STANDWALK);
+        mk(2, 50, 1, -1, 2.8f, 1.5f, -1, CS_STANDWALK); mk(3, 51, 1, -1, 3.5f, 1.55f, 1, CS_STANDWALK);   /* v1.2: 2 in its path */
         run(40, &t, NULL);
         if (sk) CHECK(dec(D_M_DIVE) == 1, "%s: life 85 with no max read: 85%%, air special (%d)", S, dec(D_M_DIVE));
 
@@ -347,6 +359,194 @@ int main(void) {
         mk(2, 50, 1, -1, 3.0f, 1.5f, -1, CS_STANDWALK);
         run(25, &t, NULL);
         CHECK(dec(D_M_FWDSP) == 0, "%s: retro Max: no gap closer (%d)", S, dec(D_M_FWDSP));
+
+        /* ===== v1.2 ===== */
+        /* 22. Survival perks: P1 alive, 2 perks (one revive) up: wait PerkWaitSeconds (10) for a player, then take the
+           non-revive perk with B; Easy: never */
+        #define PERK(i_, uid_, bon_, x_, z_, rv_) do { Activable *a_ = &w.act[i_]; memset(a_, 0, sizeof *a_); a_->uid = uid_; a_->bonusId = bon_; a_->pos.x = x_; a_->pos.z = z_; a_->havePos = 1; \
+            a_->state = 1; a_->haveData = 1; a_->haveBox = 1; a_->boxX0 = -1; a_->boxX1 = 1; a_->boxZ0 = -0.4f; a_->boxZ1 = 0.4f; a_->resuscitate = rv_; a_->destroySame = 1; if (i_ >= w.nact) w.nact = i_ + 1; } while (0)
+        #define PORTAL(i_, x_, z_) do { Activable *a_ = &w.act[i_]; memset(a_, 0, sizeof *a_); a_->uid = 99; a_->bonusId = -1; a_->pos.x = x_; a_->pos.z = z_; a_->havePos = 1; a_->state = 1; \
+            a_->haveData = 1; a_->isPortal = 1; a_->actType = 1; a_->haveBox = 1; a_->boxX0 = -1; a_->boxX1 = 1; a_->boxZ0 = 0; a_->boxZ1 = 0.5f; a_->resuscitate = -1; if (i_ >= w.nact) w.nact = i_ + 1; } while (0)
+        C.perkWaitSec = 10; C.starSavePct = 25;
+        dbg_surv_reset(); world_reset(); bot_reset(1); g_me = me = &w.ch[1]; w.survActive = 1; w.survLevelId = 0; w.survWaveId = 1; w.survEventId = 1;
+        w.ch[0].pos.x = 0; w.ch[0].pos.z = 3.5f;
+        PERK(0, 9, 5, 2.5f, 1.5f, 0); PERK(1, 10, 0, -2.5f, 1.5f, 1);
+        run(300, &t, move_me_toward_stick);
+        { int b5 = t.btn[BTN_B], d5 = dec(D_M_PERK);
+          run(450, &t, move_me_toward_stick);
+          int onPerk = fabsf(me->pos.x - 2.5f) < 0.7f && fabsf(me->pos.z - 1.5f) < 0.3f;
+          if (sk) CHECK(!b5 && !d5 && t.btn[BTN_B] >= 1 && dec(D_M_PERK) == 1 && onPerk, "%s: survival perks: waited (B %d in the first 5 s), then took the non-revive perk with B (%d presses, at %.1f, %.1f)", S, b5, t.btn[BTN_B], me->pos.x, me->pos.z);
+          else CHECK(!t.btn[BTN_B] && !b5 && !mania_any(), "%s: survival perks: no perk pick (B %d), no Normal decision (%d)", S, t.btn[BTN_B], mania_any()); }
+        /* 22b. P1 standing on a perk the whole time: no bot pick even after 12 s */
+        dbg_surv_reset(); world_reset(); bot_reset(1); g_me = me = &w.ch[1]; w.survActive = 1; w.survLevelId = 0; w.survWaveId = 1;
+        w.ch[0].pos.x = 2.4f; w.ch[0].pos.z = 1.5f; me->pos.x = -4.0f;
+        PERK(0, 9, 5, 2.5f, 1.5f, 0); PERK(1, 11, 7, 5.0f, 1.5f, 0);
+        run(750, &t, move_me_toward_stick);
+        CHECK(!t.btn[BTN_B] && dec(D_M_PERK) == 0, "%s: a player on a perk: no bot pick in 12 s (B %d)", S, t.btn[BTN_B]);
+        /* 22c. P1 dead (not in the character list): the bot goes straight for the REVIVE perk (left this time) with B */
+        dbg_surv_reset(); world_reset(); bot_reset(1); g_me = me = &w.ch[1]; w.survActive = 1; w.survLevelId = 2; w.survWaveId = 3;
+        w.ch[0].player = 7; w.ch[0].life = -0.5f;   /* P1's fighter gone */
+        PERK(0, 31, 0, -1.6f, 1.5f, 1); PERK(1, 32, 12, 2.0f, 1.5f, 0);
+        run(150, &t, move_me_toward_stick);
+        { int onRev = fabsf(me->pos.x + 1.6f) < 0.7f;
+          if (sk) CHECK(t.btn[BTN_B] >= 1 && dec(D_M_PERK) == 1 && onRev, "%s: P1 down: revive perk taken at once (B %d, at x %.1f)", S, t.btn[BTN_B], me->pos.x);
+          else CHECK(!t.btn[BTN_B] && !mania_any(), "%s: P1 down: no perk pick (B %d)", S, t.btn[BTN_B]); }
+        /* 22d. then the portal (perks gone): every player down: into the portal */
+        w.nact = 0; PORTAL(0, 0.3f, 0.6f);
+        run(150, &t, move_me_toward_stick);
+        { int in = fabsf(me->pos.x - 0.3f) < 1.0f && me->pos.z >= 0.6f - 0.05f && me->pos.z <= 1.1f + 0.05f;
+          if (sk) CHECK(in && dec(D_M_PORTAL) == 1, "%s: P1 down, portal up: walked into it (at %.1f, %.1f)", S, me->pos.x, me->pos.z);
+          else CHECK(dec(D_M_PORTAL) == 0, "%s: no portal walk", S); }
+        /* 22e. portal up with P1 alive, the bot standing in it: steps out (the player takes it) */
+        dbg_surv_reset(); world_reset(); bot_reset(1); g_me = me = &w.ch[1]; w.survActive = 1; w.survLevelId = 0; w.survWaveId = 1;
+        PORTAL(0, 0.0f, 1.2f); me->pos.x = 0.0f; me->pos.z = 1.45f; w.ch[0].pos.x = -2.0f; w.ch[0].pos.z = 2.5f;
+        run(60, &t, move_me_toward_stick);
+        { int in = fabsf(me->pos.x) < 1.0f && me->pos.z >= 1.2f && me->pos.z <= 1.7f;
+          if (sk) CHECK(!in, "%s: P1 alive: bot kept out of the portal (at %.1f, %.1f)", S, me->pos.x, me->pos.z);
+          else CHECK(dec(D_M_PORTAL) == 0, "%s: portal: no Normal decision", S); }
+        /* 22f. a perk the bot already owns is skipped (owned 5 near, 7 farther) */
+        dbg_surv_reset(); world_reset(); bot_reset(1); g_me = me = &w.ch[1]; w.survActive = 1; w.survLevelId = 0; w.survWaveId = 1;
+        w.ch[0].pos.x = 0; w.ch[0].pos.z = 3.5f; w.ps[1].nBonuses = 1; w.ps[1].bonuses[0] = 5;
+        PERK(0, 9, 5, 1.5f, 1.5f, 0); PERK(1, 10, 7, -3.0f, 1.5f, 0);
+        run(800, &t, move_me_toward_stick);
+        if (sk) CHECK(t.btn[BTN_B] >= 1 && fabsf(me->pos.x + 3.0f) < 0.7f, "%s: owned perk skipped: took bonus 7 (at x %.1f)", S, me->pos.x);
+        /* 22g. rotation: two living bots (P2, P3); round 1 -> P2 picks, round 2 -> P3 picks (P2 waits) */
+        for (int rnd = 0; rnd < 2; rnd++) {
+            dbg_surv_reset(); world_reset(); bot_reset(1); g_me = me = &w.ch[1]; w.survActive = 1; w.survLevelId = rnd; w.survWaveId = rnd + 1;
+            w.ch[0].pos.x = 0; w.ch[0].pos.z = 3.5f;
+            w.slot[2].ctrl = 2; w.slot[2].type = 1; mk(2, 3, 0, 2, -5.0f, 2.5f, 1, CS_STANDWALK);
+            bb[1].identified = 1; bb[1].playerSlot = 2; bb[1].id.ctrlId = 2;
+            PERK(0, 9, 5, 2.5f, 1.5f, 0); PERK(1, 10, 6, 5.0f, 1.5f, 0);
+            run(750, &t, move_me_toward_stick);
+            if (sk) CHECK((t.btn[BTN_B] >= 1) == (rnd == 0), "%s: rotation round %d: P2 %s (B %d)", S, rnd + 1, rnd == 0 ? "picks" : "waits for P3", t.btn[BTN_B]);
+        }
+        /* 22h. a weapon lying on a perk while waiting: Normal never presses B on a perk; Easy picks the weapon (v1.0) */
+        dbg_surv_reset(); world_reset(); bot_reset(1); g_me = me = &w.ch[1]; w.survActive = 1; w.survLevelId = 0; w.survWaveId = 1;
+        w.ch[0].pos.x = 0; w.ch[0].pos.z = 3.5f; PERK(0, 9, 5, 0.6f, 1.5f, 0);
+        w.npk = 1; w.pk[0].addr = 0x3000; w.pk[0].kind = PK_WEAPON; w.pk[0].pos.x = 0.6f; w.pk[0].pos.z = 1.5f;
+        run(200, &t, move_me_toward_stick);
+        if (sk) CHECK(!t.btn[BTN_B], "%s: weapon on a perk during the wait: no B on the perk (B %d)", S, t.btn[BTN_B]);
+        else CHECK(t.btn[BTN_B] >= 1, "%s: weapon on a perk: picked as v1.0 (B %d)", S, t.btn[BTN_B]);
+        w.npk = 0;
+
+        /* 23. star saving (Survival, Normal): boss close at 60% life: star kept; at 20%: star used; Arcade: used */
+        for (int mode = 0; mode < 3; mode++) {
+            dbg_surv_reset(); world_reset(); bot_reset(1); me = &w.ch[1]; w.ps[1].stars = 1;
+            w.survActive = mode < 2; me->life = mode == 1 ? 20 : 60;
+            mk(2, 50, 1, -1, 1.0f, 1.5f, -1, CS_STANDWALK)->boss = 1;
+            run(60, &t, NULL);
+            int want = !(sk && mode == 0);
+            CHECK((dec(D_STAR) >= 1) == want && (!sk || mode != 0 || dec(D_M_STARSAVE) == 1), "%s: star, %s, life %d%%, boss close: %s (star %d, kept %d)", S,
+                  mode == 2 ? "Arcade" : "Survival", mode == 1 ? 20 : 60, want ? "used" : "kept", dec(D_STAR), dec(D_M_STARSAVE));
+        }
+        /* 23b. Survival, 60% but surrounded (both sides): star used */
+        dbg_surv_reset(); world_reset(); bot_reset(1); me = &w.ch[1]; w.ps[1].stars = 1; w.survActive = 1; me->life = 60;
+        mk(2, 50, 1, -1, 1.0f, 1.5f, -1, CS_STANDWALK)->boss = 1; mk(3, 51, 1, -1, -0.8f, 1.6f, 1, CS_STANDWALK); mk(4, 52, 1, -1, 1.2f, 1.45f, -1, CS_STANDWALK);
+        run(120, &t, NULL);
+        CHECK(dec(D_STAR) >= 1, "%s: star, Survival, 60%%, surrounded: used (%d)", S, dec(D_STAR));
+
+        /* 24. Axel's Dragon Dive needs 2+ in its path: lone target at 2.8: none; second enemy just past it: dive */
+        world_reset(); bot_reset(1); spec_char("Axel"); mk(2, 50, 1, -1, 2.8f, 1.5f, -1, CS_STANDWALK);
+        run(40, &t, NULL);
+        CHECK(dec(D_M_DIVE) == 0, "%s: Axel, lone target at 2.8: no Dragon Dive (%d)", S, dec(D_M_DIVE));
+        world_reset(); bot_reset(1); spec_char("Axel"); mk(2, 50, 1, -1, 2.8f, 1.5f, -1, CS_STANDWALK); mk(3, 51, 1, -1, 3.5f, 1.55f, 1, CS_STANDWALK);
+        run(40, &t, NULL);
+        if (sk) CHECK(dec(D_M_DIVE) == 1, "%s: Axel, 2 in the dive's path: Dragon Dive (%d)", S, dec(D_M_DIVE));
+        else CHECK(dec(D_M_DIVE) == 0, "%s: no Dragon Dive", S);
+        /* 24b. Cherry / Floyd use their air special on a lone target at their reach */
+        { static const char *const cf[2] = { "Cherry", "Floyd" };
+          for (int k = 0; k < 2; k++) {
+              world_reset(); bot_reset(1); spec_char(cf[k]); mk(2, 50, 1, -1, 1.4f, 1.5f, -1, CS_STANDWALK);
+              run(40, &t, NULL);
+              if (sk) CHECK(dec(D_M_DIVE) == 1, "%s: %s, lone target at 1.4: air special (%d)", S, cf[k], dec(D_M_DIVE));
+              else CHECK(dec(D_M_DIVE) == 0, "%s: %s: no Normal air special", S, cf[k]);
+          } }
+        /* 25. a pipe flying along depth 1.6 to our side (inside its real hit width): out of its path */
+        world_reset(); bot_reset(1); dbg_mania_pipes_reset(); g_me = me = &w.ch[1]; w.ch[0].pos.z = 3.5f; w.ch[0].pos.x = -6.0f;
+        mk(2, 50, 1, -1, 7.0f, 2.5f, -1, CS_STANDWALK);
+        w.npj = 1; w.pj[0].uid = 135; w.pj[0].team = 1; w.pj[0].kind = 1; w.pj[0].pos.x = 1.6f; w.pj[0].pos.y = 2.2f; w.pj[0].pos.z = 4.5f; w.pj[0].vel.z = -0.5f; w.pj[0].vel.x = 0.02f;
+        run(5, &t, move_me_toward_stick);
+        if (sk) CHECK(dec(D_M_OBJROW) >= 1, "%s: pipe along depth 1.6 to the side: dodged (%d)", S, dec(D_M_OBJROW));
+        else CHECK(!mania_any(), "%s: pipe 1.6 aside: no Normal decision", S);
+        w.npj = 0;
+        /* 26. low life: 25% (below RetreatLifePercent 30, above 2/3 of it): Normal keeps fighting; 15%: retreats */
+        for (int lv = 0; lv < 2; lv++) {
+            world_reset(); bot_reset(1); me = &w.ch[1]; me->life = lv ? 15 : 25;
+            mk(2, 50, 1, -1, 1.0f, 1.5f, -1, CS_STANDWALK);
+            run(20, &t, NULL);
+            if (sk) CHECK((dec(D_M_LOWLIFE) >= 1) == (lv == 1), "%s: life %d%%, enemy near: %s (%d)", S, lv ? 15 : 25, lv ? "retreat" : "keeps fighting", dec(D_M_LOWLIFE));
+        }
+        /* 27. sloped floor (both skills): an edge learned at x 0 (z 1.6); an enemy at x 6, z 2.6 is chased (v1.1: skipped
+           within 8 x); an enemy right past the edge at x 0.5, z 2.9 is still left alone */
+        { int ofl[2];
+          for (int k = 0; k < 2; k++) {
+              world_reset(); bot_reset(1); w.ch[0].pos.x = -8.0f;
+              mk(2, 50, 1, -1, k ? 0.5f : 6.0f, k ? 2.9f : 2.6f, -1, CS_STANDWALK);
+              run(12, &t, NULL); dbg_floor_set_wall(1, 1.6f, 0.0f);
+              run(150, &t, NULL); ofl[k] = dec(D_OFFFLOOR);
+          }
+          CHECK(ofl[0] == 0 && ofl[1] >= 1, "%s: sloped floor: enemy 6 x from the learned edge chased (off-floor %d), right past it skipped (%d)", S, ofl[0], ofl[1]); }
+
+        /* 28a. breakables: interrupted while lining up depth (1.5 lanes off) -> no stale breakZAt air-punching; breaks once free */
+        world_reset(); bot_reset(1); g_me = me = &w.ch[1]; me->pos.x = -2.0f; me->pos.z = 3.0f; w.ch[0].pos.x = -0.5f; w.ch[0].pos.z = 3.5f;
+        w.nbr = 1; w.br[0].uid = 90; w.br[0].life = 2; w.br[0].entered = 1; w.br[0].pos.x = 0.0f; w.br[0].pos.z = 1.5f;
+        g_pinZ = 1; g_brkAirX = 0; g_brkLastX = 0;
+        run(12, &t, move_brk_check);
+        /* interrupt breakables for 400 ms with a pickup, keeping z pinned at 3.0 */
+        w.npk = 1; w.pk[0].addr = 0x3100; w.pk[0].kind = PK_SCORE; w.pk[0].pos.x = -2.0f; w.pk[0].pos.z = 3.0f;
+        run(25, &t, move_brk_check);
+        w.npk = 0; g_pinZ = 0;
+        run(240, &t, move_brk_check);
+        CHECK(g_brkAirX == 0 && w.br[0].life <= 0, "%s: breakable interrupted during z-align: no air punches (%d) and broken (%d)", S, g_brkAirX, w.br[0].life <= 0);
+
+        /* 28b. breakables: z stuck 1.1 lanes away -> Normal caps wall dz (no air punches); Easy unchanged */
+        world_reset(); bot_reset(1); g_me = me = &w.ch[1]; me->pos.x = -2.0f; me->pos.z = 2.6f; w.ch[0].pos.x = -0.5f; w.ch[0].pos.z = 3.5f;
+        w.nbr = 1; w.br[0].uid = 92; w.br[0].life = 2; w.br[0].entered = 1; w.br[0].pos.x = 0.0f; w.br[0].pos.z = 1.5f;
+        g_pinZ = 1; g_brkAirX = 0; g_brkLastX = 0;
+        run(70, &t, move_brk_check);
+        g_pinZ = 0;
+        if (sk) CHECK(g_brkAirX == 0, "%s: breakable stuck 1.1 lanes off: no air punches (%d)", S, g_brkAirX);
+        else CHECK(g_brkAirX >= 0, "%s: Easy breakable z-wall behavior kept (%d)", S, g_brkAirX);
+
+        /* 28c. breakables in/blocked by a trap zone (v1.2-run1 uid 20 + hazard 7): Normal skips, Easy unchanged */
+        world_reset(); bot_reset(1); g_me = me = &w.ch[1];
+        w.nhz = 1; w.hz[0].uid = 7; w.hz[0].pos.x = 0.07f; w.hz[0].pos.z = -0.15f; w.hz[0].haveZone = 1;
+        w.hz[0].x0 = -3.3f; w.hz[0].x1 = 1.1f; w.hz[0].z0 = -0.5f; w.hz[0].z1 = 0.3f;
+        me->pos.x = -2.0f; me->pos.z = 0.0f;
+        run(5, &t, NULL);
+        me->hitSrc = 7; me->life = 80; me->state = CS_STANDHIT;
+        run(2, &t, NULL);
+        me->state = CS_STANDWALK; me->hitSrc = 0; me->pos.x = -1.0f; me->pos.z = 1.2f; w.ch[0].pos.x = -2.0f; w.ch[0].pos.z = 2.0f;
+        w.nbr = 1; w.br[0].uid = 20; w.br[0].life = 1; w.br[0].entered = 1; w.br[0].pos.x = -3.8f; w.br[0].pos.z = -1.0f;
+        run(120, &t, move_me_toward_stick);
+        if (sk) CHECK(dec(D_BREAK) == 0 && t.btn[BTN_X] == 0, "%s: breakable behind trap zone: skipped (break %d, X %d)", S, dec(D_BREAK), t.btn[BTN_X]);
+        else CHECK(dec(D_BREAK) >= 1, "%s: Easy breakable behind trap zone unchanged (break %d)", S, dec(D_BREAK));
+
+        /* 29a. food: Survival cleared (portal open), 4 apples, bot at 81% (>75%), P1 at 100%: Normal eats, Easy unchanged */
+        dbg_surv_reset(); world_reset(); bot_reset(1); g_me = me = &w.ch[1]; w.survActive = 1;
+        w.nact = 1; w.act[0].uid = 30; w.act[0].isPortal = 1; w.act[0].state = 1; w.act[0].pos.x = 0.0f; w.act[0].pos.z = -1.0f;
+        me->life = 81; w.ch[0].life = 100; me->pos.x = 0.0f; me->pos.z = 1.5f;
+        w.npk = 4;
+        for (int i = 0; i < 4; i++) { w.pk[i].addr = (uintptr_t)(0x4000 + i); w.pk[i].kind = PK_FOOD; w.pk[i].lifeGain = 30; w.pk[i].pos.x = 1.2f + i * 1.5f; w.pk[i].pos.z = 1.5f; }
+        run(120, &t, move_me_toward_stick);
+        if (sk) CHECK(t.btn[BTN_B] >= 1 && dec(D_FOOD) >= 1, "%s: Survival cleared, 81%% life, 4 apples: picked one (B %d, food %d)", S, t.btn[BTN_B], dec(D_FOOD));
+        else CHECK(t.btn[BTN_B] == 0 && dec(D_FOOD) == 0, "%s: Easy 81%% life (>75%%): food left alone (B %d)", S, t.btn[BTN_B]);
+
+        /* 29b. food: mid-wave, only 1 apple, P1 at 60%, bot at 81%: left for P1 */
+        dbg_surv_reset(); world_reset(); bot_reset(1); g_me = me = &w.ch[1]; w.survActive = 1;
+        me->life = 81; w.ch[0].life = 60; me->pos.x = 0.0f; me->pos.z = 1.5f;
+        w.npk = 1; w.pk[0].addr = 0x4100; w.pk[0].kind = PK_FOOD; w.pk[0].lifeGain = 30; w.pk[0].pos.x = 1.0f; w.pk[0].pos.z = 1.5f;
+        run(100, &t, move_me_toward_stick);
+        CHECK(t.btn[BTN_B] == 0 && dec(D_FOOD) == 0, "%s: 1 apple, P1 60%%, bot 81%%: left for P1 (B %d)", S, t.btn[BTN_B]);
+
+        /* 29c. food: mid-wave, 2 apples, P1 at 85%, bot at 81%: enough safe food for everyone -> Normal eats, Easy unchanged */
+        dbg_surv_reset(); world_reset(); bot_reset(1); g_me = me = &w.ch[1]; w.survActive = 1;
+        me->life = 81; w.ch[0].life = 85; me->pos.x = 0.0f; me->pos.z = 1.5f;
+        w.npk = 2;
+        for (int i = 0; i < 2; i++) { w.pk[i].addr = (uintptr_t)(0x4200 + i); w.pk[i].kind = PK_FOOD; w.pk[i].lifeGain = 30; w.pk[i].pos.x = 1.0f + i * 2.0f; w.pk[i].pos.z = 1.5f; }
+        run(120, &t, move_me_toward_stick);
+        if (sk) CHECK(t.btn[BTN_B] >= 1 && dec(D_FOOD) >= 1, "%s: 2 apples, P1 85%%, bot 81%%: Normal eats one (B %d, food %d)", S, t.btn[BTN_B], dec(D_FOOD));
+        else CHECK(t.btn[BTN_B] == 0 && dec(D_FOOD) == 0, "%s: Easy 81%% life (>75%%): food left alone (B %d)", S, t.btn[BTN_B]);
     }
     C.botSkill = 0;
     printf("%s (%d failure(s))\n", fails ? "FAIL" : "PASS", fails);

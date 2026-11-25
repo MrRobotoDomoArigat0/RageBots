@@ -58,7 +58,8 @@ enum { D_COMBO, D_LAUNCHER, D_BLITZ, D_BACKATTACK, D_GRABTRY, D_GRAB, D_GRABHIT,
        /* v1.1 Normal skill only (internal name Mania; never counted with BotSkill=0) */
        D_M_REPOS, D_M_WALL, D_M_FOLLOWUP, D_M_STEPAWAY, D_M_PANIC, D_M_ROWDODGE, D_M_GU, D_M_GUCATCH, D_M_THROW, D_M_SMASH, D_M_PUSH, D_M_DIVE,
        D_M_HEAVYLANE, D_M_OBJROW, D_M_DIAG, D_M_BAIT, D_M_LOWLIFE, D_M_UNSTACK,   /* v1.1 stage 3 */
-       D_M_FWDSP, D_M_LEAP, D_M_PIPE, D_M_TRAPSRC, D_M_PICKTRAP, D_M_GREEN, D_COUNT };   /* v1.1 stage 4 */
+       D_M_FWDSP, D_M_LEAP, D_M_PIPE, D_M_TRAPSRC, D_M_PICKTRAP, D_M_GREEN,   /* v1.1 stage 4 */
+       D_M_PERK, D_M_PORTAL, D_M_STARSAVE, D_COUNT };   /* v1.2 Survival */
 extern const char *const k_dec_names[D_COUNT];
 
 /* m3: driving the character select with the bot's own pad, one visit at a time */
@@ -110,7 +111,8 @@ typedef struct {
     /* m6 */
     float p1PrevX, p1PrevZ, p1Vx, p1Vz; uint64_t p1PrevAt; uint32_t p1Uid;      /* P1 movement (for making way) */
     int breakSide, breakFails; float breakLife, breakStand; uint64_t breakSwingSince, breakAlignSince;
-    float breakZOff, breakZPrev; uint64_t breakStart, breakZAt, breakNudgeUntil, breakLastHit; int breakInPos, breakZBlocked;   /* m6.1 */
+    float breakZOff, breakZPrev; uint64_t breakStart, breakZAt, breakLastTick, breakNudgeUntil, breakLastHit; int breakInPos, breakZBlocked;   /* m6.1 */
+    uint64_t fightTick;
     float breakXPrev; uint64_t breakXAt;   /* m6.3 */
     float breakZLim;   /* m6.5: the reachable depth when blocked (back wall) */
     int wlx; uint64_t wlxAt; uint32_t sideUid; int sideK; uint64_t sideAt; int waitArrived; uint32_t closeOkUid; uint64_t closeOkUntil;   /* m6.7 anti-jitter */
@@ -170,6 +172,7 @@ typedef struct {
     uint64_t mReposSince, mReposUntil, mReposCool; float mReposX, mReposZ; int mReposKind;
     uint64_t mRowUntil, mRowCool; uint32_t mRowUid; float mRowZ;
     uint32_t mPushUid, mPushNoteUid; uint64_t mPushSince, mPushOkAt; int mPushSide;
+    uint64_t starSaveNoteAt;     /* v1.2 */
     uint64_t mLastDive;   /* v1.1 stage 2: air special (Axel's Dragon Dive) */
     /* v1.1 stage 3 (Normal only) */
     uint64_t mGuardUntil; uint32_t mGuardUid; float mGuardX, mGuardZ; int mGuardKind; uint64_t mGuardEndAt; float mGuardFX, mGuardFZ; float mLeapBX, mLeapBZ; uint64_t mLeapAt;   /* out of a heavy's lane / a flying object's row */

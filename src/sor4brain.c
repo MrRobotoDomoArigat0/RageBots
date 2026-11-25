@@ -289,6 +289,7 @@ typedef struct { int known, n, scene, frames; float lo, hi; int wLo, wHi; float 
 static Floor s_fl = { 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 int g_brainLearnWalls = 1;
 void brain_floor_reset(void) { memset(&s_fl, 0, sizeof s_fl); s_fl.scene = -1; }
+void dbg_floor_set_wall(int hi, float z, float x) { if (hi) { s_fl.wHi = 1; s_fl.wHiZ = z; s_fl.wHiX = x; } else { s_fl.wLo = 1; s_fl.wLoZ = z; s_fl.wLoX = x; } }   /* tests */
 int brain_floor(float *lo, float *hi) { if (lo) *lo = s_fl.lo; if (hi) *hi = s_fl.hi; return s_fl.known; }
 static void floor_update(const World *w) {
     if (w->scene != s_fl.scene || w->frames + 600 < s_fl.frames) { memset(&s_fl, 0, sizeof s_fl); s_fl.scene = w->scene; }
@@ -299,6 +300,18 @@ static void floor_update(const World *w) {
         if (s_fl.n < 1000000) s_fl.n++;
     }
     s_fl.known = s_fl.n >= 10;
+    /* v1.2 (both skills): a learned edge is only where it was learned. On a sloped floor (v1.1-run4 19:54:08: "can't
+       walk above z 8.33 at x 103.5", enemies at z 9.1+ a few x further on were skipped as off the floor and P1 died
+       next to two idle bots) the walkable depth moves with x: a player standing on the ground past an edge proves
+       the floor goes on there, so that edge is dropped (players only). */
+    for (int i = 0; i < w->nch && (s_fl.wLo || s_fl.wHi); i++) { const Chr *c = &w->ch[i];
+        if (c->scripted || c->life <= 0 || c->pos.y > 0.05f || state_is_hurt(c->state) || c->robotPart || c->robotDriver) continue;
+        if (c->player < 0) continue;                               /* players only: an enemy may stand behind a fence */
+        if (s_fl.wHi && fabsf_(c->pos.x - s_fl.wHiX) < 8.0f && c->pos.z > s_fl.wHiZ + 0.3f) {
+            LOGI("floor edge at z %.2f (x %.1f) dropped: uid %u stands on the ground at z %.2f, x %.1f (sloped floor)", s_fl.wHiZ, s_fl.wHiX, c->uid, c->pos.z, c->pos.x); s_fl.wHi = 0; }
+        if (s_fl.wLo && fabsf_(c->pos.x - s_fl.wLoX) < 8.0f && c->pos.z < s_fl.wLoZ - 0.3f) {
+            LOGI("floor edge at z %.2f (x %.1f) dropped: uid %u stands on the ground at z %.2f, x %.1f (sloped floor)", s_fl.wLoZ, s_fl.wLoX, c->uid, c->pos.z, c->pos.x); s_fl.wLo = 0; }
+    }
 }
 static uint64_t g_nowMs;
 static void wall_learn(BotBrain *b, const Chr *me, int dir) {
@@ -697,9 +710,10 @@ const char *const k_dec_names[D_COUNT] = { "combo", "launcher", "blitz", "back a
     "breakable: lined up", "breakable: missed, re-aligning", "food left for a lower bot", "spread: other side", "enemy down: waiting", "jump slam: cleared its landing spot", "shield", "trap: no-walk zone", "not released: hanging back", "explosive barrel", "off the floor: not chased", "robot part", "robot leg up: keeping out", "retaliate",
     "normal: one side", "normal: back to the wall", "normal: special follow-up", "normal: step away after special", "normal: dragon wing panic",
     "normal: off its row", "normal: grand upper (spaced)", "normal: grand upper catch", "normal: throw", "normal: forward special combo", "normal: push to edge",
-    "normal: air special (dragon dive)",
-    "normal: out of a heavy's lane", "normal: off a flying object's row", "normal: diagonal approach", "normal: baiting a heavy", "normal: low-life retreat", "normal: unstacking",
-    "normal: forward special (gap closer / pull)", "normal: out of a leap landing", "normal: flying pipe", "normal: trap zone from the hit source", "normal: pickup in a trap zone", "normal: green health lock" };
+    "normal: air special",
+    "normal: out of a heavy's lane", "normal: out of a flying object's path", "normal: diagonal approach", "normal: baiting a heavy", "normal: low-life retreat", "normal: unstacking",
+    "normal: forward special (gap closer / pull)", "normal: out of a leap landing", "normal: hovering pipe", "normal: trap zone from the hit source", "normal: pickup in a trap zone", "normal: green health lock",
+    "normal: survival perk", "normal: survival portal", "normal: star kept (survival)" };
 /* m5: escalating "can't reach it" memory (caged prisoners, enemies behind a fence, objects out of the walkable area) */
 static int unreach_find(const BotBrain *b, uint32_t uid) { for (int i = 0; i < 12; i++) if (b->unreach[i].uid == uid && uid) return i; return -1; }
 static int unreach_now(const BotBrain *b, uint32_t uid, uint64_t now) { int i = unreach_find(b, uid); return i >= 0 && now < b->unreach[i].until; }
@@ -785,6 +799,16 @@ static void used_special(BotBrain *b, float lifePct, float banked, uint64_t now)
     b->noSpecialUntil = now + 1500; b->recoverUntil = now + 4000;
 }
 static int star_ok(const BotBrain *b, int stars, uint64_t now) { return C.useStars && stars > 0 && (!b->lastStar || now - b->lastStar > 8000); }
+/* v1.2 (Normal, Survival only): keep the star for when it saves us: used only at or below StarSaveHealth, or when
+   surrounded (enemies on both sides, 3+ near); the held / juggled emergencies are not affected. Arcade unchanged. */
+static int star_saving(BotBrain *b, const World *w, float lifePct, int nearCount, int nearFront, int nearBehind, uint64_t now, const char *why) {
+    if (C.botSkill != 1 || !w->survActive) return 0;
+    if (lifePct <= (float)C.starSavePct) return 0;
+    if (nearFront >= 1 && nearBehind >= 1 && nearCount >= 3) return 0;
+    if (!b->starSaveNoteAt || now - b->starSaveNoteAt > 10000) { b->starSaveNoteAt = now;
+        note(b, D_M_STARSAVE, "%s, but life %.0f%% > %d%% and not surrounded: star kept for later", why, lifePct, C.starSavePct); }
+    return 1;
+}
 static void do_star(BotBrain *b, uint64_t now) {
     GO(b->starYB ? -2 : 7, 1, 0, { 100, 0, 0, SB_STAR }, { 500, 0, 0, 0 });
     b->lastStar = now;
@@ -957,8 +981,12 @@ static int off_floor_kind(const Chr *c) {
         if (s_nOffSticky < 8) s_offSticky[s_nOffSticky++] = c->uid; else s_offSticky[c->uid & 7] = c->uid;
         return 2;
     }
-    if (s_fl.wLo && fabsf_(c->pos.x - s_fl.wLoX) < 8.0f && c->pos.z < s_fl.wLoZ - 0.8f) return 3;
-    if (s_fl.wHi && fabsf_(c->pos.x - s_fl.wHiX) < 8.0f && c->pos.z > s_fl.wHiZ + 0.8f) return 3;
+    /* v1.2 (both skills): only near where the edge was learned (3 x, was 8) and with a margin that grows with the x
+       distance (a sloped floor's edge moves with x) */
+    if (s_w) for (int i = 0; i < s_w->nch; i++) { const Chr *p = &s_w->ch[i];   /* v1.2: right next to a player: reachable */
+        if (p->player >= 0 && p->team == 0 && p->life > 0 && fabsf_(p->pos.x - c->pos.x) < 1.5f && fabsf_(p->pos.z - c->pos.z) < 0.6f) return 0; }
+    if (s_fl.wLo && fabsf_(c->pos.x - s_fl.wLoX) < 3.0f && c->pos.z < s_fl.wLoZ - 0.8f - 0.3f * fabsf_(c->pos.x - s_fl.wLoX)) return 3;
+    if (s_fl.wHi && fabsf_(c->pos.x - s_fl.wHiX) < 3.0f && c->pos.z > s_fl.wHiZ + 0.8f + 0.3f * fabsf_(c->pos.x - s_fl.wHiX)) return 3;
     return 0;
 }
 static int unreach_add(BotBrain *b, uint32_t uid, uint64_t now, int passive);
@@ -1254,7 +1282,25 @@ static void held_track(BotBrain *b, const Chr *me, uint64_t now) {   /* m7.2: ca
 }
 /* v1.1 (m8): the Mania bot skill. Every hook below in fight() is behind C.botSkill == 1; BotSkill=0 (Easy) is the v1.0 brain. */
 #include "sor4mania.inc"
+#include "sor4surv.inc"     /* v1.2 Survival perks and portal (Normal) */
+static int mania_brk_blocked(const Chr *me, const Brk *r, float standDist, float lo, float hi, uint64_t now) {
+    if (!s_ntz) return 0;
+    const TrapZone *t = tz_at(r->pos.x, r->pos.z, 0.35f, now);
+    if (t && !t->partUid) return 1;
+    float rx = r->pos.x + standDist, lx = r->pos.x - standDist;
+    int rOk = rx >= lo && rx <= hi, lOk = lx >= lo && lx <= hi;
+    const TrapZone *tr = rOk ? tz_at(rx, r->pos.z, 0.25f, now) : NULL;
+    const TrapZone *tl = lOk ? tz_at(lx, r->pos.z, 0.25f, now) : NULL;
+    if ((rOk || lOk) && (!rOk || (tr && !tr->partUid)) && (!lOk || (tl && !tl->partUid))) return 1;
+    for (int s = 1; s <= 3; s++) {
+        float u = s * 0.25f;
+        t = tz_at(me->pos.x + (r->pos.x - me->pos.x) * u, me->pos.z + (r->pos.z - me->pos.z) * u, 0.2f, now);
+        if (t && !t->partUid) return 1;
+    }
+    return 0;
+}
 static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Chr *me, uint64_t now, PadOut *o) {
+    b->fightTick++;
     held_track(b, me, now);
     if (!b->fightLastAt || now - b->fightLastAt > 1000) b->fightSince = now; b->fightLastAt = now;
     if (me->life > b->maxLife) b->maxLife = me->life;
@@ -1319,6 +1365,8 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
                  life_pct(p1), moving_attack(p1->state) ? " ATTACKING" : "");
         }
     }
+
+    if (survival_perks(b, all, nall, w, me, range, now, o)) return;   /* v1.2 Survival perks / portal (Normal only) */
 
     /* ---- enemies ---- */
     const Chr *tgt = NULL, *incoming = NULL, *behind = NULL, *bossNear = NULL; float bestScore = 1e30f, inBest = 1e30f, bhBest = 1e30f;
@@ -1593,6 +1641,8 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
         if (bossNear && fabsf_(bossNear->pos.z - me->pos.z) < lane * 1.5f) why = "boss close";
         else if (nearCount >= 4) why = "big crowd";
         else if (lifePct < 30 && nearCount >= 2) why = "emergency";
+        else if (C.botSkill == 1 && w->survActive && lifePct <= (float)C.starSavePct && nearCount >= 1) why = "saving itself (survival)";   /* v1.2 */
+        if (why && star_saving(b, w, lifePct, nearCount, nearFront, nearBehind, now, why)) why = NULL;   /* v1.2 */
         if (why) { do_star(b, now); note(b, D_STAR, "%s (%d near, %d star(s), life %.0f%%)", why, nearCount, stars, lifePct); seq_run(b, now, o); WHY("star move: %s", why); return; }
     }
 
@@ -1646,6 +1696,46 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
 
     /* ---- 6. pickups ---- */
     if (C.usePickups) {
+        /* v1.2 Normal: if missing some health (<95%), eat when safe food covers everyone hurt or in Survival after the wave clears */
+        int foodSurplus = 0;
+        if (C.botSkill == 1 && C.foodLifePct > 0 && lifePct < 95.0f) {
+            int safeFood = 0, hurtPlayers = 0, humanNeedCount = 0, lowerBots = 0;
+            for (int i = 0; i < w->npk; i++) {
+                const Pick *q = &w->pk[i];
+                if (q->kind != PK_FOOD || q->held || is_bad_pick(b, q->addr, now) || unreach_now(b, pick_key(q->addr), now) ||
+                    fabsf_(q->pos.x - anchorX) > screenW * 0.55f || q->pos.y > sizeY * 0.1f ||
+                    q->pos.x < camLo - range * 0.3f || q->pos.x > camHi + range * 0.3f) continue;
+                const TrapZone *t = tz_at(q->pos.x, q->pos.z, 0.25f, now);
+                if (t && !t->partUid) continue;
+                safeFood++;
+            }
+            if (safeFood > 0) {
+                hurtPlayers = 1;
+                for (int s = 0; s < w->nslot; s++) {
+                    if (s == b->playerSlot || w->slot[s].ctrl < 0 || brain_ctrl_is_bot(all, nall, w->slot[s].ctrl)) continue;
+                    const Chr *h = slot_fighter(w, s);
+                    if (h && h->life > 0 && h->state != CS_STANDDIE) {
+                        float hp = life_pct(h);
+                        if (hp < 95.0f) { hurtPlayers++; humanNeedCount += (hp < 55.0f ? 2 : 1); }
+                    }
+                }
+                for (int k = 0; k < nall; k++) {
+                    const BotBrain *ob = &all[k];
+                    if (ob == b || !ob->identified || ob->playerSlot < 0) continue;
+                    const Chr *oc = slot_fighter(w, ob->playerSlot);
+                    if (!oc || oc->life <= 0 || oc->state == CS_STANDDIE) continue;
+                    float op = life_pct(oc);
+                    if (op < 95.0f) {
+                        hurtPlayers++;
+                        if (op < lifePct - 0.5f || (fabsf_(op - lifePct) <= 0.5f && ob->index < b->index)) lowerBots++;
+                    }
+                }
+                int survCleared = w->survActive && !tgt && w->nact > 0;
+                if ((safeFood >= hurtPlayers && humanNeed >= 55.0f) ||
+                    (survCleared && safeFood > humanNeedCount && lowerBots < safeFood - humanNeedCount))
+                    foodSurplus = 1;
+            }
+        }
         const Pick *goal = NULL; float gBest = 1e30f; int gKind = 0;
         for (int i = 0; i < w->npk; i++) {
             const Pick *p = &w->pk[i];
@@ -1668,28 +1758,30 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
                 }
                 continue;
             }
-            if (p->kind == PK_FOOD && lifePct < (float)C.foodLifePct) {
-                /* m6: only the lowest-life bot goes for food; the others leave it */
+            if (p->kind == PK_FOOD && (lifePct < (float)C.foodLifePct || foodSurplus)) {
+                /* m6: only the lowest-life bot goes for food; the others leave it (unless Normal has surplus food) */
                 const BotBrain *lower = NULL; float lowerPct = 0;
-                for (int k = 0; k < nall; k++) {
-                    const BotBrain *ob = &all[k];
-                    if (ob == b || !ob->identified || ob->playerSlot < 0) continue;
-                    const Chr *oc = slot_fighter(w, ob->playerSlot);
-                    if (!oc || oc->life <= 0 || oc->state == CS_STANDDIE) continue;
-                    float op = life_pct(oc);
-                    if (op < lifePct - 0.5f || (fabsf_(op - lifePct) <= 0.5f && ob->index < b->index)) { lower = ob; lowerPct = op; }
-                }
-                if (lower) {
-                    int known = 0; for (int k = 0; k < b->nleftFor; k++) known |= b->leftFor[k] == p->addr;
-                    if (!known) { if (b->nleftFor < 8) b->leftFor[b->nleftFor++] = p->addr; else b->leftFor[0] = p->addr;
-                                  note(b, D_FOODSHARE, "%s is at %.0f%% life, we are at %.0f%%", lower->name, lowerPct, lifePct); }
-                    continue;
-                }
-                if (humanNeed < (float)C.foodLifePct && humanNeed <= lifePct + 10.0f) {
-                    int known = 0; for (int k = 0; k < b->nleftFor; k++) known |= b->leftFor[k] == p->addr;
-                    if (!known) { if (b->nleftFor < 8) b->leftFor[b->nleftFor++] = p->addr; else b->leftFor[0] = p->addr;
-                                  note(b, D_FOODLEFT, "a human is at %.0f%% life, we are at %.0f%%", humanNeed, lifePct); }
-                    continue;
+                if (!foodSurplus) {
+                    for (int k = 0; k < nall; k++) {
+                        const BotBrain *ob = &all[k];
+                        if (ob == b || !ob->identified || ob->playerSlot < 0) continue;
+                        const Chr *oc = slot_fighter(w, ob->playerSlot);
+                        if (!oc || oc->life <= 0 || oc->state == CS_STANDDIE) continue;
+                        float op = life_pct(oc);
+                        if (op < lifePct - 0.5f || (fabsf_(op - lifePct) <= 0.5f && ob->index < b->index)) { lower = ob; lowerPct = op; }
+                    }
+                    if (lower) {
+                        int known = 0; for (int k = 0; k < b->nleftFor; k++) known |= b->leftFor[k] == p->addr;
+                        if (!known) { if (b->nleftFor < 8) b->leftFor[b->nleftFor++] = p->addr; else b->leftFor[0] = p->addr;
+                                      note(b, D_FOODSHARE, "%s is at %.0f%% life, we are at %.0f%%", lower->name, lowerPct, lifePct); }
+                        continue;
+                    }
+                    if (humanNeed < (float)C.foodLifePct && humanNeed <= lifePct + 10.0f) {
+                        int known = 0; for (int k = 0; k < b->nleftFor; k++) known |= b->leftFor[k] == p->addr;
+                        if (!known) { if (b->nleftFor < 8) b->leftFor[b->nleftFor++] = p->addr; else b->leftFor[0] = p->addr;
+                                      note(b, D_FOODLEFT, "a human is at %.0f%% life, we are at %.0f%%", humanNeed, lifePct); }
+                        continue;
+                    }
                 }
                 int taken = 0;
                 for (int k = 0; k < nall; k++) if (&all[k] != b && all[k].goalPick == p->addr) taken = 1;
@@ -1823,6 +1915,7 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
             }
             if (r->pos.x < camLo - range || r->pos.x > camHi + range) continue;          /* m6.2: at the screen edge */
             if (fabsf_(r->pos.x - anchorX) > screenW * 0.45f || (w->haveCam && fabsf_(r->pos.x - w->cam.x) > screenW * 0.45f)) continue;
+            if (C.botSkill == 1 && mania_brk_blocked(me, r, clampf_(range * 1.6f, 1.8f, 2.2f), camLo, camHi, now)) continue;
             /* m6.2: one bot per breakable: skip one another bot holds (claim refreshed every frame it works on it), and
                leave it to a free bot that is clearly closer */
             int other = 0; float myD = fabsf_(r->pos.x - me->pos.x) + 2.0f * fabsf_(r->pos.z - me->pos.z);
@@ -1842,6 +1935,8 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
         if (!bt) b->breakUid = 0;
         if (bt) {
             b->breakClaimAt = now;
+            if (b->breakLastTick + 1 != b->fightTick) b->breakZAt = 0;
+            b->breakLastTick = b->fightTick;
             s_walkLo = camLo; s_walkHi = camHi;   /* m6.3: any breakable on screen (the m6.2 "not ahead of P1" cap stopped the bots short) */
             /* m6.1: line up on the object's depth lane when we can, but never insist on it: the m6 live log had a
                trash can at z 0.0 on the front edge of the floor, the bots could not get below z 0.1-0.3, waited for
@@ -1882,7 +1977,7 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
             float az = fabsf_(tz - me->pos.z);
             int ph = b->breakInPos;
             if (ph && !onSide) ph = 0;
-            if (ph >= 1 && az > 0.30f && (!b->breakZBlocked || fabsf_(me->pos.z - b->breakZLim) > 0.3f)) { ph = 0; b->breakSwingSince = 0; b->breakZBlocked = 0; }
+            if (ph >= 1 && az > 0.30f && (!b->breakZBlocked || fabsf_(me->pos.z - b->breakZLim) > 0.3f || (C.botSkill == 1 && az > lane * 2.5f))) { ph = 0; b->breakSwingSince = 0; b->breakZBlocked = 0; }
             if (ph == 2 && axo > b->breakStand + 0.6f) { ph = 1; b->breakSwingSince = 0; }
             b->breakInPos = ph;
             if (ph < 2) {
@@ -1905,7 +2000,7 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
                 /* m6.5 (m6.4-run1b, cans at the back wall): the can's lane can be past the reachable depth. No z progress
                    for 0.3 s -> that's the depth limit: use it (P1 breaks these from the normal floor). Far away: walk
                    toward our stand point (never away), keep x still near it. */
-                if (onSide && (az < 0.06f || (b->breakZBlocked && axo <= alignX + 0.5f))) {   /* hysteresis: in at 0.06, out past 0.3; m6.7: only from our side */
+                if (onSide && (az < 0.06f || (b->breakZBlocked && axo <= alignX + 0.5f && (C.botSkill != 1 || az <= lane * 2.5f)))) {   /* hysteresis: in at 0.06, out past 0.3; m6.7: only from our side; v1.2 Normal: cap wall dz */
                     b->breakInPos = ph = 1; b->breakXAt = 0;   /* on its lane (even if already close): only x moves from here */
                 }
                 if (ph == 0) {
@@ -1931,10 +2026,14 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
                     if (az >= 0.03f && !b->breakZBlocked) o->axis[AX_LY] = (int16_t)(sgn(tz - me->pos.z) * b->zSign * (az < 0.3f ? STICK / 2 : STICK));
                     else if (b->breakZBlocked && az >= 0.03f && fabsf_(me->pos.z - b->breakZLim) > 0.15f) b->breakZBlocked = 0;   /* moved off the limit: try again */
                     if (o->axis[AX_LY]) {
+                        uint64_t zStallMs = C.botSkill == 1 ? 500u : 300u;
                         if (!b->breakZAt || fabsf_(me->pos.z - b->breakZPrev) > 0.02f) { b->breakZPrev = me->pos.z; b->breakZAt = now; }
-                        else if (now - b->breakZAt > 300) {      /* depth limit (back wall / floor edge): use the best depth we reach */
-                            b->breakZBlocked = 1; b->breakZLim = me->pos.z; b->breakZAt = 0;
-                            LOGD("%s: breakable uid %u: depth limit at z %.2f (dz %.2f), using it", b->name, bt->uid, me->pos.z, dz);
+                        else if (now - b->breakZAt > zStallMs) { /* depth limit (back wall / floor edge): use the best depth we reach */
+                            b->breakZAt = 0;
+                            if (C.botSkill != 1 || az <= lane * 2.5f) {
+                                b->breakZBlocked = 1; b->breakZLim = me->pos.z;
+                                LOGD("%s: breakable uid %u: depth limit at z %.2f (dz %.2f), using it", b->name, bt->uid, me->pos.z, dz);
+                            }
                         }
                     }
                     WHY("breakable uid %u: lining up its depth at dx %.2f (dz %.2f)%s", bt->uid, -dx, tz - me->pos.z, b->breakZBlocked ? ", at the depth limit" : ""); return;
@@ -2237,7 +2336,7 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
        budget allows, otherwise the full string, chained (the shield breaks after enough damage) */
     if (shFront) {
         float stFrac = tgt->maxStamina > 0 && tgt->stamina >= 0 ? tgt->stamina / tgt->maxStamina : 1.0f;
-        if (star_ok(b, stars, now) && stFrac >= 0.5f && now - b->lastShieldStar > 15000 && adx < range * 1.2f) {
+        if (star_ok(b, stars, now) && stFrac >= 0.5f && now - b->lastShieldStar > 15000 && adx < range * 1.2f && !star_saving(b, w, lifePct, nearCount, nearFront, nearBehind, now, "shield")) {
             b->lastShieldStar = now; do_star(b, now);
             SHTAC(2, "star move into the shield of uid %u (stamina %.0f%%)", tgt->uid, stFrac * 100.0f);
             seq_run(b, now, o); WHY("star move into the shield of uid %u", tgt->uid); return;
@@ -2577,6 +2676,7 @@ void brain_think(BotBrain *b, BotBrain *all, int nall, const World *w, int state
     floor_update(w); parts_update(w, now); retal_update(all, nall, w, now);      /* m7.4 */
     {   const World *fw = robot_world(w, me, now);                                  /* m7.4: + grounded robot parts */
         fight(b, all, nall, fw, fw == w ? me : &fw->ch[me - w->ch], now, o);
+        surv_guard_b(b, w, me, now, o);                                            /* v1.2: no stray B on a perk */
         if (b->targetUid && part_track(b->targetUid) && (b->mode == M_APPROACH || b->mode == M_ATTACK) && b->partLastAt && now > b->partLastAt && now - b->partLastAt < 500) s_botPartMs += now - b->partLastAt;
         b->partLastAt = now; }
 done:

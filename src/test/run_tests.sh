@@ -1,8 +1,9 @@
 #!/bin/sh
 # Offline tests (no game files, no game logs needed).
 #   brain_test : the bot brain on hand-made game snapshots (combat, pickups, traps, robot legs, ...)
-#   mania_test : v1.1 Bot skill: Easy = the v1.0 brain, Normal behaviors (hand-made snapshots)
+#   mania_test : Bot skill: Easy = the v1.0 brain, Normal behaviors incl. v1.2 Survival perks / star saving (hand-made snapshots)
 #   menu_test  : the F7 menu model and overlay drawing
+#   pads_test  : v1.2 pad dedupe (Steam Deck / Steam Input / a pad seen through two SDL drivers)
 #   fs_test    : ForceBorderless (needs SDL2_REAL like test_host2, and a display)
 #   test_host2 : loads the built SDL2.dll like the game does and checks the bot pads and the F7 menu.
 #                Needs the official SDL 2.32.10 x64 SDL2.dll; point SDL2_REAL at it (skipped otherwise).
@@ -16,6 +17,7 @@ export WINEDEBUG=${WINEDEBUG:--all}
 OUT=../../build/test; mkdir -p $OUT
 $CC -O2 -o $OUT/brain_test.exe brain_test.c ../sor4brain.c ../sor4state.c ../sor4meta.c
 $CC -O2 -o $OUT/mania_test.exe mania_test.c ../sor4brain.c ../sor4state.c ../sor4meta.c
+$CC -O2 -o $OUT/pads_test.exe pads_test.c
 $CC -O2 -o $OUT/menu_test.exe menu_test.c ../sor4menu.c -lgdi32 -luser32
 $CC -O2 -o $OUT/test_host2.exe test_host2.c
 $CC -O2 -o $OUT/fs_test.exe fs_test.c
@@ -31,6 +33,11 @@ timeout 300 $WINE ./mania_test.exe > mania_test.out || true
 grep -E '^FAIL' mania_test.out || true
 echo "$(grep -c '^OK' mania_test.out) checks OK; $(tail -1 mania_test.out)"
 tail -1 mania_test.out | grep -q '^PASS' || fail=1
+echo "== v1.2 pad dedupe (Steam Deck / Steam Input / second SDL driver)"
+timeout 60 $WINE ./pads_test.exe > pads_test.out || true
+grep -E '^FAIL' pads_test.out || true
+echo "$(grep -c '^OK' pads_test.out) checks OK; $(tail -1 pads_test.out)"
+tail -1 pads_test.out | grep -q '^PASS' || fail=1
 echo "== F7 menu model and drawing"
 timeout 120 $WINE ./menu_test.exe menu_preview.bgra | tail -2
 if [ -n "$SDL2_REAL" ] && [ -f "$SDL2_REAL" ]; then

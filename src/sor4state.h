@@ -65,7 +65,8 @@ typedef struct { uint32_t uid; V3 pos, vel; int team, kind; } Proj;   /* kind 0 
 typedef struct { int ctrl, type, status; } SlotInfo;
 typedef struct { int playable, continues, allyId; float life, fury; int score;
                  int stars; float banked; int starBtn, starYB; float weaponLife;
-                 int alt[5]; } PlayerStateInfo;   /* v1.1 stage 4: alternative blitz / neutral / forward / air special / star move picked in the menu (-1 unknown) */
+                 int alt[5];
+    int nBonuses, bonusTotal; int bonuses[64]; } PlayerStateInfo;   /* v1.1 stage 4: alternative blitz / neutral / forward / air special / star move picked in the menu (-1 unknown) */
                  /* m7.2: weaponInHandLife (-1 unknown); m4: starCount, bankedLife, star-move control options (-1 unknown) */
 
 #define W_MAXCH 64
@@ -89,6 +90,15 @@ typedef struct { int uid, active, broken, animId, firstDriver, nDrivers, nParts;
    cooldownTimer; zone = HazardData.zone bounding box around pos, if it reads plausibly) and DamageAreaInstance (kind 1:
    radius) */
 typedef struct { uint32_t uid; V3 pos; int kind, anim, timer, cooldown, haveZone; float x0, x1, z0, z1; } Haz;
+#define W_MAXACT 32
+/* v1.2-perklog: Survival perks and portal (ActivableInstance + ActivableData + SurvivalBonus) */
+typedef struct {
+    uint32_t uid; V3 pos; int havePos;
+    int state, bonusId, spawnTimer, deactivateTimer;
+    int isPortal, actType, destroySame, haveData;
+    int haveBox; float boxX0, boxZ0, boxX1, boxZ1;
+    int resuscitate; char title[64];
+} Activable;
 typedef struct {
     int ok;                       /* a level is running and was read this frame */
     uint64_t seq;
@@ -125,6 +135,11 @@ typedef struct {
                                   /* cursor = PlayerUserData.menuEntryId (index into the roster), playable =
                                      innerPlayableIndex (0 = not confirmed, else roster index + 1), palette = color
                                      (0 = default), altConfirmed = special-moves menu confirmed (-1 unknown) */
+    /* v1.2-perklog: read-only Survival state (populated only when Survival screen/mode is active) */
+    int nact; Activable act[W_MAXACT];
+    int survActive;
+    int survLevelId, survModeState, survAllGetBonus;
+    int survWaveId, survEventId, survTransTimer, survOutNoInteract;
 } World;
 
 /* playable characters, from main.metaGameConfigRef -> MetaGameConfigData.playableCharacterArray */

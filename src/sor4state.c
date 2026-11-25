@@ -73,6 +73,15 @@ static int OFF_rd_parts = -1, OFF_rd_heal = -1, OFF_rd_dmg = -1, OFF_rpd_life = 
 static int OFF_ch_stamina = -1, OFF_ch_stBroken = -1, OFF_ch_guardHits = -1, OFF_ch_lastGuard = -1, OFF_cd_maxSt = -1, OFF_cd_moves = -1, OFF_cd_name = -1, OFF_mv_block = -1;   /* m6.7 */
 static int OFF_cd_dname = -1, OFF_cd_maxLife = -1;   /* v1.1 stage 3 */
 static int OFF_hz_anim = -1, OFF_hz_timer = -1, OFF_hz_cool = -1, OFF_hz_data = -1, OFF_hd_zone = -1, OFF_da_radius = -1;   /* m6.7 */
+/* v1.2-perklog: Survival perks and portal (read-only) */
+static const uint8_t *EE_ACT, *EE_ACTDATA, *EE_SURVCFG, *EE_SBONUS, *EE_GMSURV;
+static int OFF_act_state = -1, OFF_act_bonusId = -1, OFF_act_spawnTimer = -1, OFF_act_deactTimer = -1, OFF_act_data = -1;
+static int OFF_ad_actType = -1, OFF_ad_destroySame = -1, OFF_ad_isPortal = -1, OFF_ad_box = -1;
+static int OFF_mc_survCfg = -1, OFF_sc_bonuses = -1;
+static int OFF_sb_title = -1, OFF_sb_maxOcc = -1, OFF_sb_resusc = -1;
+static int OFF_ps_bonuses = -1;
+static int OFF_mgs_gameMode = -1, OFF_gms_levelId = -1, OFF_gms_state = -1, OFF_gms_allGetBonus = -1;
+static int OFF_ls_survWave = -1, OFF_ls_survEvent = -1, OFF_ls_survTrans = -1, OFF_ls_survOutNoInt = -1;
 static const uint8_t *EE_MGS, *EE_MENU_CS, *EE_CSSCREEN, *EE_SM, *EE_MCD, *EE_PC, *EE_UD;
 static int g_onGlobal = -1;                                    /* online.globalState offset in the online statics */
 static const uint8_t *g_progCell, *g_mainCell; static int g_offMainMenu = -1, g_offPauseMenu = -1, g_offCfgRef = -1;
@@ -278,6 +287,33 @@ int state_init(const void *exeBase) {
     O.pc_name = fld(PC_, "name", 0); O.pc_skins = fld(PC_, "alternateSkinArray", 0);
     O.pc_left = fld(PC_, "menuLeftId", 0); O.pc_right = fld(PC_, "menuRightId", 0); O.pc_up = fld(PC_, "menuUpId", 0);
     O.pc_down = fld(PC_, "menuDownId", 0); O.pc_id = fld(PC_, "menuId", 0); O.pc_adam = fld(PC_, "isSor4Adam", 0); O.pc_roo = fld(PC_, "isSor3Roo", 0);
+    /* v1.2-perklog: Survival perks and portal (all optional, read-only) */
+    EE_ACT = typ(G_ "ActivableInstance", 0); EE_ACTDATA = typ(G_ "ActivableData", 0);
+    EE_SURVCFG = typ(G_ "SurvivalConfigData", 0); EE_SBONUS = typ(G_ "SurvivalBonus", 0);
+    EE_GMSURV = typ(MG_ "GameMode+Survival", 0);
+    OFF_act_state = fld(G_ "ActivableInstance", "state", 0);
+    OFF_act_bonusId = fld(G_ "ActivableInstance", "bonusId", 0);
+    OFF_act_spawnTimer = fld(G_ "ActivableInstance", "spawnTimer", 0);
+    OFF_act_deactTimer = fld(G_ "ActivableInstance", "deactivateTimer", 0);
+    OFF_act_data = fld(G_ "ActivableInstance", "dataRef", 0);
+    OFF_ad_actType = fld(G_ "ActivableData", "activationType", 0);
+    OFF_ad_destroySame = fld(G_ "ActivableData", "destroyActivablesWithTheSameDataOnActivation", 0);
+    OFF_ad_isPortal = fld(G_ "ActivableData", "isSurvivalPortal", 0);
+    OFF_ad_box = fld(G_ "ActivableData", "activationBox", 0);
+    OFF_mc_survCfg = fld(MG_ "MetaGameConfigData", "survivalConfig", 0);
+    OFF_sc_bonuses = fld(G_ "SurvivalConfigData", "bonusArray", 0);
+    OFF_sb_title = fld(G_ "SurvivalBonus", "title", 0);
+    OFF_sb_maxOcc = fld(G_ "SurvivalBonus", "maxOccurrences", 0);
+    OFF_sb_resusc = fld(G_ "SurvivalBonus", "resuscitatePlayers", 0);
+    OFF_ps_bonuses = fld(G_ "PlayerState_s", "bonusIdArray", 0);
+    OFF_mgs_gameMode = fld(MG_ "MetaGameGlobalState", "gameMode", 0);
+    OFF_gms_levelId = fld(MG_ "GameMode+Survival", "levelId", 0);
+    OFF_gms_state = fld(MG_ "GameMode+Survival", "state", 0);
+    OFF_gms_allGetBonus = fld(MG_ "GameMode+Survival", "customAllPlayersGetBonus", 0);
+    OFF_ls_survWave = fld(G_ "LevelState", "survivalWaveId", 0);
+    OFF_ls_survEvent = fld(G_ "LevelState", "survivalEventId", 0);
+    OFF_ls_survTrans = fld(G_ "LevelState", "survivalTransitionTimer", 0);
+    OFF_ls_survOutNoInt = fld(G_ "LevelState", "survivalOutOfNoInteractionMode", 0);
     {
         const uint8_t *ck; int off, st;
         uint32_t tp = meta_find_type(&M, MG_ "program"), tm = meta_find_type(&M, "BeatThemAll.main");
@@ -344,8 +380,10 @@ int state_init(const void *exeBase) {
     for (int i = 0; i < 6; i++) if (pm[i] > O.pkRead) O.pkRead = pm[i];
     O.gsRead = 8; int gm[] = { O.gs_levels + 8, O.gs_players + 8, O.gs_frames + 4, O.gs_mode + 4, O.gs_over + 1, O.gs_boss + 1 };
     for (int i = 0; i < 6; i++) if (gm[i] > O.gsRead) O.gsRead = gm[i];
-    O.lsRead = 8; int lm[] = { O.ls_chars + 8, O.ls_cams + 8, O.ls_picks + 8, O.ls_scene + 4, O.ls_objs + 8, O.ls_wall + 4 };
-    for (int i = 0; i < 6; i++) if (lm[i] > O.lsRead) O.lsRead = lm[i];
+    O.lsRead = 8; int lm[] = { O.ls_chars + 8, O.ls_cams + 8, O.ls_picks + 8, O.ls_scene + 4, O.ls_objs + 8, O.ls_wall + 4,
+                               OFF_ls_survWave >= 0 ? OFF_ls_survWave + 4 : 0, OFF_ls_survEvent >= 0 ? OFF_ls_survEvent + 4 : 0,
+                               OFF_ls_survTrans >= 0 ? OFF_ls_survTrans + 4 : 0, OFF_ls_survOutNoInt >= 0 ? OFF_ls_survOutNoInt + 1 : 0 };
+    for (size_t i = 0; i < sizeof lm / sizeof *lm; i++) if (lm[i] > O.lsRead) O.lsRead = lm[i];
     O.ctlRead = 8; int cm[] = { O.cc_analog + 8, O.ai_attacking + 1, O.ai_target + 4, O.cc_guard + 1, O.ai_los + 1, O.ai_root + 4 };
     for (int i = 0; i < 6; i++) if (cm[i] > O.ctlRead) O.ctlRead = cm[i];
     if (O.ctlRead > 512) O.ctlRead = 512;
@@ -954,15 +992,26 @@ static int screen_info(uintptr_t sm, char *top, size_t n) {
 static uintptr_t cell_obj(const uint8_t *cell) { return cell ? cell_object(cell) : 0; }
 static void read_menu(World *w, uintptr_t on) {
     w->menuRead = 0; w->menuName[0] = 0; w->topScreen[0] = 0; w->mainScreens = w->pauseScreens = -1; w->charSel = 0; w->ncs = 0;
+    w->survActive = 0; w->survLevelId = w->survModeState = w->survAllGetBonus = -1;
     uintptr_t prog = cell_obj(g_progCell);
     if (prog && g_offMainMenu > 0) w->mainScreens = screen_info(rp(prog + g_offMainMenu), w->topScreen, sizeof w->topScreen);
     if (prog && g_offPauseMenu > 0) w->pauseScreens = screen_info(rp(prog + g_offPauseMenu), NULL, 0);
+    if (!strcmp(w->topScreen, "SurvivalScreen")) w->survActive = 1;
     g_menuQuiet = 0;
     if (!on || g_onGlobal < 0 || !EE_MGS || O.mgs_menu < 0) return;
     uintptr_t mgs = rp(on + g_onGlobal);
     if (!obj_is(mgs, EE_MGS)) return;
     w->menuRead = 1;
     if (O.mgs_ff >= 0) { uint8_t ff = 0; if (rd(mgs + O.mgs_ff, &ff, 1)) w->friendlyFire = ff != 0; }
+    if (OFF_mgs_gameMode >= 0 && EE_GMSURV) {
+        uintptr_t gm = rp(mgs + OFF_mgs_gameMode);
+        if (obj_is(gm, EE_GMSURV)) {
+            w->survActive = 1;
+            if (OFF_gms_levelId >= 0) w->survLevelId = ri(gm + OFF_gms_levelId);
+            if (OFF_gms_state >= 0) w->survModeState = ri(gm + OFF_gms_state);
+            if (OFF_gms_allGetBonus >= 0) { uint8_t ab = 0; if (rd(gm + OFF_gms_allGetBonus, &ab, 1)) w->survAllGetBonus = ab != 0; }
+        }
+    }
     uintptr_t menu = rp(mgs + O.mgs_menu);
     if (menu) short_type_name(rp(menu), w->menuName, sizeof w->menuName);
     int isCs = menu && EE_MENU_CS && rp(menu) == (uintptr_t)EE_MENU_CS;
@@ -1300,6 +1349,195 @@ static void read_robots(World *w, uintptr_t list) {
         }
     }
 }
+/* v1.2-perklog: SurvivalBonus table cache + one-time dump, ActivableInstance, and change-only logging */
+#define MAX_SBON 256
+static struct { int valid, maxOcc, resusc; char title[64]; } g_sbon[MAX_SBON];
+static int g_nsbon, g_sbonDumped;
+static ULONGLONG g_sbonTry;
+
+static void survival_dump_bonus_table(void) {
+    if (g_sbonDumped) return;
+    ULONGLONG now = GetTickCount64();
+    if (g_sbonTry && now - g_sbonTry < 1000) return;
+    g_sbonTry = now;
+    uintptr_t mc = cell_obj(g_mainCell);
+    if (!mc || g_offCfgRef < 0 || OFF_mc_survCfg < 0 || OFF_sc_bonuses < 0) return;
+    uintptr_t cfg = rp(mc + g_offCfgRef + 8);
+    if (!obj_is(cfg, EE_MCD)) return;
+    uintptr_t sc = rp(cfg + OFF_mc_survCfg + 8);
+    if (!obj_is(sc, EE_SURVCFG)) return;
+    uintptr_t arr = rp(sc + OFF_sc_bonuses);
+    if (!arr || (arr & 7)) return;
+    uintptr_t aee = rp(arr); uint16_t comp = 0;
+    if (!aee || !rd(aee, &comp, 2) || comp != 8) return;
+    int32_t n = 0;
+    if (!rd(arr + 8, &n, 4) || n <= 0 || n > 512) return;
+    int count = n < MAX_SBON ? n : MAX_SBON;
+    int validCount = 0;
+    memset(g_sbon, 0, sizeof g_sbon);
+    for (int i = 0; i < count; i++) {
+        uintptr_t b = rp(arr + 16 + 8 * (uintptr_t)i);
+        if (!obj_is(b, EE_SBONUS)) continue;
+        g_sbon[i].valid = 1;
+        g_sbon[i].maxOcc = OFF_sb_maxOcc >= 0 ? ri(b + OFF_sb_maxOcc) : -1;
+        uint8_t rv = 0;
+        g_sbon[i].resusc = (OFF_sb_resusc >= 0 && rd(b + OFF_sb_resusc, &rv, 1)) ? (rv != 0) : -1;
+        if (OFF_sb_title >= 0) {
+            uintptr_t sp = rp(b + OFF_sb_title);
+            if (sp && (!EE_STRING || obj_is(sp, EE_STRING))) read_str(sp, g_sbon[i].title, sizeof g_sbon[i].title);
+        }
+        validCount++;
+    }
+    if (validCount <= 0) return;
+    g_nsbon = count;
+    g_sbonDumped = 1;
+    LOGI("SurvivalBonus table (%d entries%s):", n, n > MAX_SBON ? ", truncated to 256" : "");
+    for (int i = 0; i < count; i++) {
+        if (!g_sbon[i].valid) continue;
+        LOGI("  bonus[%d]: title=\"%s\" maxOccurrences=%d resuscitatePlayers=%d",
+             i, g_sbon[i].title[0] ? g_sbon[i].title : "-", g_sbon[i].maxOcc, g_sbon[i].resusc);
+    }
+}
+
+static float f_abs(float v) { return v < 0 ? -v : v; }
+
+static void survival_log_changes(const World *w) {
+    static int s_inSurv;
+    static int s_modeSeen, s_prevGmLv, s_prevGmSt, s_prevAllBon;
+    static int s_lvlSeen, s_prevWave, s_prevEvent, s_prevOutNoInt, s_prevScene, s_prevTrans, s_transTicks;
+    static Activable s_prevAct[W_MAXACT]; static int s_nPrevAct;
+    static struct { int seen, total, n; int ids[64]; } s_prevBon[8];
+
+    if (!w || !w->survActive) {
+        if (s_inSurv) {
+            s_inSurv = 0; s_modeSeen = 0; s_lvlSeen = 0; s_nPrevAct = 0; s_transTicks = 0;
+            memset(s_prevBon, 0, sizeof s_prevBon);
+        }
+        return;
+    }
+    s_inSurv = 1;
+
+    if (!w->ok) {
+        if (s_nPrevAct > 0) {
+            LOGI("SURVIVAL ACTIVABLES: cleared (%d) on level unload", s_nPrevAct);
+            s_nPrevAct = 0;
+        }
+        s_lvlSeen = 0;
+        if ((w->survLevelId >= 0 || w->survModeState >= 0) &&
+            (!s_modeSeen || s_prevGmLv != w->survLevelId || s_prevGmSt != w->survModeState || s_prevAllBon != w->survAllGetBonus)) {
+            LOGI("SURVIVAL MODE: gmLevel=%d gmState=%d allBonus=%d (no level)", w->survLevelId, w->survModeState, w->survAllGetBonus);
+            s_modeSeen = 1; s_prevGmLv = w->survLevelId; s_prevGmSt = w->survModeState; s_prevAllBon = w->survAllGetBonus;
+        }
+        return;
+    }
+
+    /* 1. Survival wave/mode/transition fields on change */
+    int coreChanged = !s_lvlSeen || !s_modeSeen ||
+        s_prevGmLv != w->survLevelId || s_prevGmSt != w->survModeState || s_prevAllBon != w->survAllGetBonus ||
+        s_prevWave != w->survWaveId || s_prevEvent != w->survEventId ||
+        s_prevOutNoInt != w->survOutNoInteract || s_prevScene != w->scene;
+    int transChanged = 0;
+    if (s_lvlSeen && w->survTransTimer != s_prevTrans) {
+        int dt = w->survTransTimer - s_prevTrans; if (dt < 0) dt = -dt;
+        if ((s_prevTrans <= 0) != (w->survTransTimer <= 0) || dt > 1) {
+            transChanged = 1; s_transTicks = 0;
+        } else {
+            s_transTicks++;
+            if (s_transTicks % 30 == 0) transChanged = 1;
+        }
+    } else if (w->survTransTimer == s_prevTrans) {
+        s_transTicks = 0;
+    }
+    if (coreChanged || transChanged) {
+        /* v1.2: round / wave / event changes at INFO; transition-timer ticks only at DEBUG */
+        if (coreChanged) LOGI("SURVIVAL STATE: gmLevel=%d gmState=%d allBonus=%d wave=%d event=%d transTimer=%d outNoInt=%d scene=%d",
+             w->survLevelId, w->survModeState, w->survAllGetBonus,
+             w->survWaveId, w->survEventId, w->survTransTimer, w->survOutNoInteract, w->scene);
+        else LOGD("SURVIVAL STATE: gmLevel=%d gmState=%d allBonus=%d wave=%d event=%d transTimer=%d outNoInt=%d scene=%d",
+             w->survLevelId, w->survModeState, w->survAllGetBonus,
+             w->survWaveId, w->survEventId, w->survTransTimer, w->survOutNoInteract, w->scene);
+        s_modeSeen = 1; s_lvlSeen = 1;
+        s_prevGmLv = w->survLevelId; s_prevGmSt = w->survModeState; s_prevAllBon = w->survAllGetBonus;
+        s_prevWave = w->survWaveId; s_prevEvent = w->survEventId; s_prevOutNoInt = w->survOutNoInteract;
+        s_prevScene = w->scene; s_prevTrans = w->survTransTimer;
+    } else {
+        s_prevTrans = w->survTransTimer;
+    }
+
+    /* 2. Each ActivableInstance on change (appear, field change, disappear) */
+    for (int i = 0; i < w->nact; i++) {
+        const Activable *a = &w->act[i];
+        int pk = -1;
+        for (int j = 0; j < s_nPrevAct; j++) {
+            if (a->uid ? (s_prevAct[j].uid == a->uid) : (j == i)) { pk = j; break; }
+        }
+        int changed = (pk < 0);
+        if (pk >= 0) {
+            const Activable *p = &s_prevAct[pk];
+            if (p->state != a->state || p->bonusId != a->bonusId || p->isPortal != a->isPortal ||
+                p->actType != a->actType || p->destroySame != a->destroySame || p->resuscitate != a->resuscitate ||
+                p->haveData != a->haveData || p->havePos != a->havePos || p->haveBox != a->haveBox ||
+                f_abs(p->pos.x - a->pos.x) > 0.05f || f_abs(p->pos.y - a->pos.y) > 0.05f || f_abs(p->pos.z - a->pos.z) > 0.05f ||
+                f_abs(p->boxX0 - a->boxX0) > 0.02f || f_abs(p->boxZ0 - a->boxZ0) > 0.02f ||
+                f_abs(p->boxX1 - a->boxX1) > 0.02f || f_abs(p->boxZ1 - a->boxZ1) > 0.02f) {
+                changed = 1;
+            }
+        }
+        if (changed) {
+            const char *tag = pk < 0 ? "NEW" : "CHG";
+            char stStr[32];
+            if (pk >= 0 && s_prevAct[pk].state != a->state) snprintf(stStr, sizeof stStr, "%d->%d", s_prevAct[pk].state, a->state);
+            else snprintf(stStr, sizeof stStr, "%d", a->state);
+            LOGI("SURVIVAL ACTIVABLE %s uid=%u pos=(%.2f,%.2f,%.2f) state=%s bonusId=%d title=\"%s\" resusc=%d portal=%d actType=%d destroySame=%d box=(%.2f,%.2f..%.2f,%.2f) timers=(%d,%d)",
+                 tag, a->uid, a->pos.x, a->pos.y, a->pos.z, stStr, a->bonusId,
+                 a->title[0] ? a->title : "-", a->resuscitate, a->isPortal, a->actType, a->destroySame,
+                 a->boxX0, a->boxZ0, a->boxX1, a->boxZ1, a->spawnTimer, a->deactivateTimer);
+        }
+    }
+    for (int j = 0; j < s_nPrevAct; j++) {
+        const Activable *p = &s_prevAct[j];
+        int found = 0;
+        for (int i = 0; i < w->nact; i++) {
+            if (p->uid ? (w->act[i].uid == p->uid) : (i == j)) { found = 1; break; }
+        }
+        if (!found) {
+            LOGI("SURVIVAL ACTIVABLE GONE uid=%u lastState=%d bonusId=%d title=\"%s\" portal=%d",
+                 p->uid, p->state, p->bonusId, p->title[0] ? p->title : "-", p->isPortal);
+        }
+    }
+    s_nPrevAct = w->nact < W_MAXACT ? w->nact : W_MAXACT;
+    if (s_nPrevAct > 0) memcpy(s_prevAct, w->act, (size_t)s_nPrevAct * sizeof(Activable));
+
+    /* 3. Per-player owned bonusIdArray on change */
+    for (int i = 0; i < w->nps && i < 8; i++) {
+        const PlayerStateInfo *ps = &w->ps[i];
+        if (ps->bonusTotal < 0) continue;
+        int diff = !s_prevBon[i].seen || s_prevBon[i].total != ps->bonusTotal || s_prevBon[i].n != ps->nBonuses;
+        if (!diff) {
+            for (int k = 0; k < ps->nBonuses; k++) {
+                if (s_prevBon[i].ids[k] != ps->bonuses[k]) { diff = 1; break; }
+            }
+        }
+        if (diff) {
+            int wasSeen = s_prevBon[i].seen;
+            s_prevBon[i].seen = 1;
+            s_prevBon[i].total = ps->bonusTotal;
+            s_prevBon[i].n = ps->nBonuses;
+            if (ps->nBonuses > 0) memcpy(s_prevBon[i].ids, ps->bonuses, (size_t)ps->nBonuses * sizeof(int));
+            if (wasSeen || ps->bonusTotal > 0 || ps->playable > 0) {
+                char buf[768]; int L = 0; buf[0] = 0;
+                for (int k = 0; k < ps->nBonuses && L < (int)sizeof buf - 80; k++) {
+                    int bid = ps->bonuses[k];
+                    const char *bt = (bid >= 0 && bid < g_nsbon && g_sbon[bid].valid && g_sbon[bid].title[0]) ? g_sbon[bid].title : "?";
+                    L += snprintf(buf + L, sizeof buf - L, "%s%d(\"%s\")", k ? ", " : "", bid, bt);
+                }
+                if (ps->bonusTotal > ps->nBonuses && L < (int)sizeof buf - 16) L += snprintf(buf + L, sizeof buf - L, ", ...");
+                LOGI("SURVIVAL P%d bonuses (%d): [%s]", i + 1, ps->bonusTotal, buf);
+            }
+        }
+    }
+}
+
 static void read_projectiles(World *w, uintptr_t list) {
     uintptr_t ol[256]; int n = read_list(list, ol, 256);
     uint8_t hb[64], sb[512];
@@ -1374,6 +1612,45 @@ static void read_projectiles(World *w, uintptr_t list) {
             for (int k = 0; k < g_nrpPrev; k++) if (g_rpPrev[k].uid == q->uid && q->uid) { q->vel.x = q->pos.x - g_rpPrev[k].pos.x; q->vel.y = q->pos.y - g_rpPrev[k].pos.y; q->vel.z = q->pos.z - g_rpPrev[k].pos.z; break; }
             continue;
         }
+        if (EE_ACT && ee == (uintptr_t)EE_ACT) {
+            if (!w->survActive) continue;
+            if (w->nact >= W_MAXACT) continue;
+            Activable *a = &w->act[w->nact++]; memset(a, 0, sizeof *a);
+            a->uid = (O.pob_uid >= 0 && O.pob_uid + 4 <= 48) ? (uint32_t)g32(hb, O.pob_uid) : 0;
+            a->state = a->bonusId = a->spawnTimer = a->deactivateTimer = -1;
+            a->isPortal = a->actType = a->destroySame = a->resuscitate = -1;
+            uintptr_t spr = O.pob_sprite >= 0 ? rp(ol[i] + O.pob_sprite) : 0;
+            if (spr && rd(spr, sb, O.sprRead)) {
+                a->havePos = 1;
+                a->pos.x = fx(g32(sb, O.spr_pos));
+                a->pos.y = fx(g32(sb, O.spr_pos + 4));
+                a->pos.z = fx(g32(sb, O.spr_pos + 8));
+            }
+            int32_t v32 = 0;
+            if (OFF_act_state >= 0 && rd(ol[i] + OFF_act_state, &v32, 4)) a->state = v32;
+            if (OFF_act_bonusId >= 0 && rd(ol[i] + OFF_act_bonusId, &v32, 4)) a->bonusId = v32;
+            if (OFF_act_spawnTimer >= 0 && rd(ol[i] + OFF_act_spawnTimer, &v32, 4)) a->spawnTimer = v32;
+            if (OFF_act_deactTimer >= 0 && rd(ol[i] + OFF_act_deactTimer, &v32, 4)) a->deactivateTimer = v32;
+            uintptr_t ad = OFF_act_data >= 0 ? rp(ol[i] + OFF_act_data + 8) : 0;
+            if (obj_is(ad, EE_ACTDATA)) {
+                a->haveData = 1;
+                uint8_t b = 0;
+                if (OFF_ad_isPortal >= 0 && rd(ad + OFF_ad_isPortal, &b, 1)) a->isPortal = b != 0;
+                if (OFF_ad_destroySame >= 0 && rd(ad + OFF_ad_destroySame, &b, 1)) a->destroySame = b != 0;
+                if (OFF_ad_actType >= 0 && rd(ad + OFF_ad_actType, &v32, 4)) a->actType = v32;
+                int32_t box[4];
+                if (OFF_ad_box >= 0 && rd(ad + OFF_ad_box, box, 16)) {
+                    a->haveBox = 1;
+                    a->boxX0 = fx(box[0]); a->boxZ0 = fx(box[1]);
+                    a->boxX1 = fx(box[2]); a->boxZ1 = fx(box[3]);
+                }
+            }
+            if (a->bonusId >= 0 && a->bonusId < g_nsbon && g_sbon[a->bonusId].valid) {
+                a->resuscitate = g_sbon[a->bonusId].resusc;
+                snprintf(a->title, sizeof a->title, "%s", g_sbon[a->bonusId].title);
+            }
+            continue;
+        }
         if (EE_PROJ && ee == (uintptr_t)EE_PROJ) kind = 0; else if (EE_THROWN && ee == (uintptr_t)EE_THROWN) kind = 1;
         else {                                                  /* m6.7: name every other object type once (trap hunting) */
             static uintptr_t seenEE[32]; static int nSeen; int k;
@@ -1398,10 +1675,12 @@ static void read_projectiles(World *w, uintptr_t list) {
 }
 static int g_adv, g_same;
 int state_read(World *w) {
-    w->ok = 0; w->nch = w->npk = w->npj = w->nbr = w->nhz = w->nslot = w->nps = 0; w->nrp = w->nrb = 0; w->bossMode = 0; w->haveWall = 0; w->haveCam = 0; w->source = "off"; w->frozen = 0; w->frozenMs = 0;
+    w->ok = 0; w->nch = w->npk = w->npj = w->nbr = w->nhz = w->nslot = w->nps = 0; w->nrp = w->nrb = 0; w->nact = 0; w->bossMode = 0; w->haveWall = 0; w->haveCam = 0; w->source = "off"; w->frozen = 0; w->frozenMs = 0;
     w->live = 0; w->paused = 0; w->pausedSlot = -1; w->pausedStatus = 0; w->noGameState = 0; w->noGsWhy = "";
     w->friendlyFire = -1;
     w->menuRead = 0; w->charSel = 0; w->ncs = 0; w->mainScreens = w->pauseScreens = -1; w->menuName[0] = w->topScreen[0] = 0;
+    w->survActive = 0; w->survLevelId = w->survModeState = w->survAllGetBonus = -1;
+    w->survWaveId = w->survEventId = w->survTransTimer = w->survOutNoInteract = -1;
     if (!state_available()) return 0;
     w->seq++;
     if (g_trState == 2) trace_log();
@@ -1417,6 +1696,7 @@ int state_read(World *w) {
         }
     }
     read_menu(w, on);
+    if (w->survActive) survival_dump_bonus_table();
     {   /* m7.2: friendly fire (Options / character select); keep the last value seen when globalState is not readable */
         static int lastFF = -1;
         if (w->friendlyFire >= 0) { if (w->friendlyFire != lastFF) LOGI("Friendly fire is %s (MetaGameGlobalState.friendlyFireEnabled).", w->friendlyFire ? "ON" : "OFF"); lastFF = w->friendlyFire; }
@@ -1444,6 +1724,7 @@ int state_read(World *w) {
         else if (g_lastSearchN != 0) w->noGsWhy = "the last search found GameState objects";
         else if (now - done > 12000) w->noGsWhy = "the last search is too old";
         else { w->noGameState = 1; w->noGsWhy = "the last search found no GameState objects"; }
+        survival_log_changes(w);
         return 0;
     }
     uint8_t g[512]; if (!rd(gs, g, O.gsRead)) return 0;
@@ -1482,18 +1763,39 @@ int state_read(World *w) {
                 p->starBtn = O.ps_starBtn >= 0 && O.ps_starBtn < comp ? e[O.ps_starBtn] : -1;
                 p->starYB = O.ps_starYB >= 0 && O.ps_starYB < comp ? e[O.ps_starYB] : -1;
                 for (int k = 0; k < 5; k++) p->alt[k] = O.ps_alt[k] >= 0 && O.ps_alt[k] < comp ? (e[O.ps_alt[k]] ? 1 : 0) : -1;   /* v1.1 stage 4 */
+                p->nBonuses = 0; p->bonusTotal = -1;
+                if (w->survActive && OFF_ps_bonuses >= 0 && OFF_ps_bonuses + 8 <= comp) {
+                    uintptr_t barr = g64(e, OFF_ps_bonuses);
+                    if (!barr) {
+                        p->bonusTotal = 0;
+                    } else if (!(barr & 7)) {
+                        uintptr_t bee = rp(barr); uint16_t bcomp = 0; int32_t bn = 0;
+                        if (bee && rd(bee, &bcomp, 2) && bcomp == 4 && rd(barr + 8, &bn, 4) && bn >= 0 && bn <= 256) {
+                            p->bonusTotal = bn;
+                            int m = bn < 64 ? bn : 64;
+                            if (m > 0 && rd(barr + 16, p->bonuses, (size_t)m * 4)) p->nBonuses = m;
+                            else if (m > 0) p->bonusTotal = -1;
+                        }
+                    }
+                }
             }
         }
     }
     uintptr_t levels[64]; int nl = read_list(g64(g, O.gs_levels), levels, 64);
     w->nLevels = nl;
-    if (nl <= 0) return 0;
+    if (nl <= 0) { survival_log_changes(w); return 0; }
     uintptr_t ls = levels[nl - 1];
     uint8_t l[512];
-    if (!obj_is(ls, EE_LS) || !rd(ls, l, O.lsRead)) return 0;
+    if (!obj_is(ls, EE_LS) || !rd(ls, l, O.lsRead)) { survival_log_changes(w); return 0; }
     w->scene = O.ls_scene >= 0 ? g32(l, O.ls_scene) : 0;
     if (w->scene != g_cacheScene) { g_cacheScene = w->scene; g_ncd = g_npd = 0; }
     w->haveWall = O.ls_wall >= 0; w->leftWallX = O.ls_wall >= 0 ? fx(g32(l, O.ls_wall)) : 0;
+    if (w->survActive) {
+        if (OFF_ls_survWave >= 0 && OFF_ls_survWave + 4 <= O.lsRead) w->survWaveId = g32(l, OFF_ls_survWave);
+        if (OFF_ls_survEvent >= 0 && OFF_ls_survEvent + 4 <= O.lsRead) w->survEventId = g32(l, OFF_ls_survEvent);
+        if (OFF_ls_survTrans >= 0 && OFF_ls_survTrans + 4 <= O.lsRead) w->survTransTimer = g32(l, OFF_ls_survTrans);
+        if (OFF_ls_survOutNoInt >= 0 && OFF_ls_survOutNoInt < O.lsRead) w->survOutNoInteract = l[OFF_ls_survOutNoInt] != 0;
+    }
 
     uintptr_t cl[W_MAXCH]; int nc = read_list(g64(l, O.ls_chars), cl, W_MAXCH);
     uint8_t cb[1024], sb[512];
@@ -1576,7 +1878,7 @@ int state_read(World *w) {
             for (int k = 0; k < w->nch; k++) if (w->ch[k].heldAddr == p->addr) p->held = 1;
         }
     }
-    if (O.ls_objs >= 0 && (EE_PROJ || EE_THROWN || EE_DESTR || EE_HAZ || EE_DMGA || EE_RPART)) read_projectiles(w, g64(l, O.ls_objs));
+    if (O.ls_objs >= 0 && (EE_PROJ || EE_THROWN || EE_DESTR || EE_HAZ || EE_DMGA || EE_RPART || (w->survActive && EE_ACT))) read_projectiles(w, g64(l, O.ls_objs));
     if (OFF_ls_robots >= 0 && EE_ROBOT) read_robots(w, rp(ls + OFF_ls_robots));                                /* m7.4 */
     if (O.ls_cams >= 0 && EE_CAM && O.cam_pos >= 0) {
         uintptr_t cams[4]; int ncam = read_list(g64(l, O.ls_cams), cams, 4);
@@ -1588,6 +1890,7 @@ int state_read(World *w) {
     }
     w->ok = 1;
     w->live = g_adv >= 10 && g_same < 6;
+    survival_log_changes(w);
     return 1;
 }
 
@@ -1645,6 +1948,16 @@ void state_dump(const World *w, const char *tag) {
         LOGI("  player %d: playable=%d life=%.1f banked=%.1f stars=%d starButton=%d starYB=%d weaponInHandLife=%.1f alt=%d%d%d%d%d", i + 1, w->ps[i].playable, w->ps[i].life, w->ps[i].banked, w->ps[i].stars, w->ps[i].starBtn, w->ps[i].starYB, w->ps[i].weaponLife,
              w->ps[i].alt[0] < 0 ? 9 : w->ps[i].alt[0], w->ps[i].alt[1] < 0 ? 9 : w->ps[i].alt[1], w->ps[i].alt[2] < 0 ? 9 : w->ps[i].alt[2], w->ps[i].alt[3] < 0 ? 9 : w->ps[i].alt[3], w->ps[i].alt[4] < 0 ? 9 : w->ps[i].alt[4]);
     if (w->bossMode || w->haveWall) LOGI("  bossMode=%d leftWallX=%.1f", w->bossMode, w->leftWallX);
+    if (w->survActive) {
+        LOGI("  survival: gmLevel=%d gmState=%d allBonus=%d wave=%d event=%d transTimer=%d outNoInt=%d activables=%d",
+             w->survLevelId, w->survModeState, w->survAllGetBonus, w->survWaveId, w->survEventId, w->survTransTimer, w->survOutNoInteract, w->nact);
+        for (int i = 0; i < w->nact; i++) {
+            const Activable *a = &w->act[i];
+            LOGI("  activable uid=%u pos=(%.2f,%.2f,%.2f) state=%d bonusId=%d title=\"%s\" resusc=%d portal=%d actType=%d box=(%.2f,%.2f..%.2f,%.2f)",
+                 a->uid, a->pos.x, a->pos.y, a->pos.z, a->state, a->bonusId, a->title[0] ? a->title : "-",
+                 a->resuscitate, a->isPortal, a->actType, a->boxX0, a->boxZ0, a->boxX1, a->boxZ1);
+        }
+    }
 }
 /* v1.1 stage 3: per-frame test events (called by the host every frame while DumpState=1) */
 static struct { uint32_t uid; float maxSeen; int move, state; } g_evH[32]; static int g_nevH;

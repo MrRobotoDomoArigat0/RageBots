@@ -365,6 +365,12 @@ static int m_trap_between(const Chr *me, float x1, float lane, uint64_t now) {
     }
     return 0;
 }
+static const char *m_air_name(const CharProfile *pf) {
+    static const char *const k[][2] = { { "Axel", "Dragon Dive" }, { "Blaze", "Tobi Kyaku" }, { "Cherry", "Air Townshend" }, { "Floyd", "Thunder Pounce" },
+                                        { "Adam", "Air Chopper" }, { "Max", "Body Slam" }, { "Shiva", "Air Senretsu Ken" }, { "Estel", "Air Grenade" } };
+    for (size_t i = 0; i < sizeof k / sizeof *k; i++) if (pf && pf->name && !_stricmp(pf->name, k[i][0])) return k[i][1];
+    return "air special";
+}
 static int mania_dive(BotBrain *b, const MCtx *m, const World *w, const Chr *me, const CharProfile *pf, const Chr *tgt, int side, int facing, int shFront,
                       float adx, float adz, float lifePct, float banked, float camLo, float camHi, uint64_t now, PadOut *o) {
     float range = m->range, lane = m->lane;
@@ -382,6 +388,15 @@ static int mania_dive(BotBrain *b, const MCtx *m, const World *w, const Chr *me,
         float cdx = (c->pos.x - me->pos.x) * side;
         if (cdx > range * 0.2f && cdx < adx && fabsf_(c->pos.z - me->pos.z) < lane * 1.5f && c->pos.y < 0.5f) crowd++;
     }
+    /* v1.2: Axel's Dragon Dive only when it will hit enough: enemies along the roll (between us and just past the
+       target, near our lane), the target counted; 2+ needed (a lone target: walk in and combo instead) */
+    int hits = 0;
+    for (int i = 0; i < w->nch; i++) { const Chr *c = &w->ch[i];
+        if (!is_enemy_of(c, me) || c->life <= 0 || state_is_down(c->state) || c->scripted || c->untargettable || c->entered == 0) continue;
+        float cdx = (c->pos.x - me->pos.x) * side;
+        if (cdx > range * 0.2f && cdx < adx + range * 0.9f && fabsf_(c->pos.z - me->pos.z) < lane * 1.2f && c->pos.y < 1.0f) hits++;
+    }
+    int isAxel = pf && pf->name && !_stricmp(pf->name, "Axel") && !m_alt(b, MALT_AIR);
     const char *why = NULL;
     if (kind == 2) {
         float oLo = aLo > 1.0f ? aLo + 0.6f * (aHi - aLo) * 0.5f : 1.6f, oHi = aHi - 0.2f;   /* Axel: 1.6-2.8 (stage 2/3); Blaze: 1.6-2.0 */
@@ -390,9 +405,22 @@ static int mania_dive(BotBrain *b, const MCtx *m, const World *w, const Chr *me,
         if (m_trap_between(me, tgt->pos.x, lane, now)) why = "over a floor trap";
         else if (crowd >= 2 && adx <= range * oHi) why = "over the crowd in front";
         else if (adx >= range * oLo && adx <= range * oHi) why = "opener at mid range";
+        if (isAxel && hits < 2 && !(why && !strcmp(why, "over a floor trap"))) return 0;   /* v1.2 */
     } else {
-        if (adx < range * aLo || adx > range * aHi || crowd + 1 < 2 || m->hugger) return 0;
-        why = "opener on a crowd";
+        /* v1.2: Cherry (Air Townshend) and Floyd (Thunder Pounce) never met "2+ between us and the target" at their
+           short reach (0 air specials in every log): for them, enemies around the landing spot count, a lone target
+           too when nobody else is close to us */
+        int land = 0;
+        for (int i = 0; i < w->nch; i++) { const Chr *c = &w->ch[i];
+            if (!is_enemy_of(c, me) || c->life <= 0 || state_is_down(c->state) || c->scripted || c->entered == 0) continue;
+            if (fabsf_(c->pos.x - tgt->pos.x) < range * 1.0f && fabsf_(c->pos.z - tgt->pos.z) < lane * 1.5f) land++;
+        }
+        int cf = pf && pf->name && (!_stricmp(pf->name, "Cherry") || !_stricmp(pf->name, "Floyd")) && !m_alt(b, MALT_AIR);
+        if (adx < range * aLo || adx > range * aHi || m->hugger) return 0;
+        if (crowd + 1 >= 2) why = "opener on a crowd";
+        else if (cf && land >= 2) why = "onto a group";
+        else if (cf && m->cL + m->cR <= 1) why = "opener on a lone target";
+        else return 0;
     }
     if (!why) return 0;
     if (tgt->boss && !strcmp(why, "opener at mid range") && tgt->aiAttacking) return 0;   /* a boss mid-swing: not into it */
@@ -403,7 +431,7 @@ static int mania_dive(BotBrain *b, const MCtx *m, const World *w, const Chr *me,
     if (kind == 2) GO(38, side, 0, { 70, F, 0, SB_A }, { 150, F, 0, 0 }, { 80, F, 0, SB_Y }, { 650, F, 0, 0 }, { 150, 0, 0, 0 });
     else GO(38, side, 0, { 70, 0, 0, SB_A }, { 160, 0, 0, 0 }, { 80, 0, 0, SB_Y }, { 550, 0, 0, 0 });
     used_jump(b, 38, now); used_special(b, lifePct, banked, now); b->mLastDive = now; b->lastAirSpecial = now; b->nextComboAt = 0;
-    note(b, D_M_DIVE, "%s at uid %u (dx %.1f dz %.1f, %d in between, life %.0f%%)", why, tgt->uid, side * adx, adz, crowd, lifePct);
+    note(b, D_M_DIVE, "%s: %s at uid %u (dx %.1f dz %.1f, %d in between, %d in its path, life %.0f%%)", m_air_name(pf), why, tgt->uid, side * adx, adz, crowd, hits, lifePct);
     seq_run(b, now, o); set_mode(b, M_ATTACK, now, NULL); WHY("normal: air special %s at uid %u", why, tgt->uid); return 1;
 }
 
@@ -509,15 +537,18 @@ static int m_obj_danger(const World *w, const Chr *me, float x, float z, float r
         int d = 0;
         if (sp2 > 0.03f * 0.03f) {                                   /* flying: along its velocity (x AND depth) */
             if (p->pos.y < 0.4f && p->vel.y < 0) continue;           /* falling onto the floor */
-            for (int t = 0; t <= 36 && d < 2; t += 3) {
+            /* v1.2: Koobo's pipes fly along DEPTH at hover height and hit up to ~2.0 to the side of their centre
+               (v1.1-run3/run5: 15 bot hits at |dx| 0.35-1.95): a wider path for a thrown object moving mostly in depth */
+            float hw = (p->kind == 1 && fabsf_(p->vel.z) > fabsf_(p->vel.x)) ? 2.1f : 0.9f;
+            for (int t = 0; t <= 36 && d < 2; t++) {           /* v1.2: every frame (a pipe moves 0.5-0.8 per frame in depth: 3-frame steps skipped spots) */
                 float px = p->pos.x + p->vel.x * (float)t, pz = p->pos.z + p->vel.z * (float)t;
-                if (fabsf_(px - x) < 0.9f && fabsf_(pz - z) < lane * 1.6f) d = 2;
+                if (fabsf_(px - x) < hw && fabsf_(pz - z) < lane * 1.6f) d = 2;
             }
         } else {                                                     /* hovering / rising: about to shoot at somebody near */
             uint64_t age = m_pj_age(p->uid, now);
             if (age > 4500) continue;
             if (adx < 3.0f && adz < 1.3f) d = 2;
-            else if ((adz < lane * 1.8f && adx < range * 7.0f) || (adx < 1.0f && adz < 4.0f)) d = 1;
+            else if ((adz < lane * 1.8f && adx < range * 7.0f) || (adx < 2.1f && adz < 6.0f)) d = 1;   /* v1.2: its depth column, pipe-wide */
         }
         if (d > best) { best = d; if (out) *out = p; }
     }
@@ -879,13 +910,16 @@ static void mania_goal(BotBrain *b, const MCtx *m, const World *w, BotBrain *all
    enemy's row. 7 s at most, then 2.5 s of (careful: diagonal) fighting. */
 static int mania_retreat(BotBrain *b, const MCtx *m, const World *w, const Chr *me, const Chr *p1, float lifePct, float camLo, float camHi, uint64_t now, PadOut *o) {
     float range = m->range, lane = m->lane;
-    if (C.retreatLifePct <= 0 || lifePct >= (float)C.retreatLifePct) { b->mRetSince = 0; return 0; }
+    /* v1.2: less retreating (v1.1-run4: 38 s / 20 s / 9 s spent retreating or holding below 30% with no regen):
+       starts at 2/3 of RetreatLifePercent (30 -> 20%), 4 s at most then 4 s of fighting, shorter hysteresis */
+    float retPct = (float)C.retreatLifePct * 2.0f / 3.0f;
+    if (C.retreatLifePct <= 0 || lifePct >= retPct) { b->mRetSince = 0; return 0; }
     const Chr *thr = NULL; float tb = 1e30f, sumX = 0; int n = 0;
     for (int i = 0; i < w->nch; i++) { const Chr *c = &w->ch[i];
         if (!m_live_enemy(c, me)) continue;
         if (w->haveCam && fabsf_(c->pos.x - w->cam.x) > m->screenW * 0.5f + range) continue;
         float adx = fabsf_(c->pos.x - me->pos.x), adz = fabsf_(c->pos.z - me->pos.z);
-        float rx = b->mRetSince ? 6.0f : 3.5f, rz = b->mRetSince ? 7.0f : 5.0f;   /* hysteresis: once retreating, keep going until clearly clear */
+        float rx = b->mRetSince ? 5.0f : 3.0f, rz = b->mRetSince ? 6.0f : 4.5f;   /* hysteresis: once retreating, keep going until clearly clear */
         float zr = lane * rz > range * rx * 0.5f ? lane * rz : range * rx * 0.5f;
         if ((adx < range * rx && adz < zr) || (m_heavy(c) && adx < range * (b->mRetSince || (C.botSkill == 1 && b->mRetLastEnd && now - b->mRetLastEnd < 1500) ? 9.0f : 7.0f))) {
             sumX += c->pos.x; n++;
@@ -895,7 +929,7 @@ static int mania_retreat(BotBrain *b, const MCtx *m, const World *w, const Chr *
     if (!thr) {
         if (b->mRetSince) b->mRetLastEnd = now;
         b->mRetSince = 0;
-        if (b->mRetLastEnd && now - b->mRetLastEnd < 1500) {   /* v1.1 stage 4: just clear at low life: hold here a moment, not straight back in (run1 14:12:30 stutter) */
+        if (b->mRetLastEnd && now - b->mRetLastEnd < 800) {    /* v1.2: 0.8 s (was 1.5). v1.1 stage 4: just clear at low life: hold here a moment, not straight back in (run1 14:12:30 stutter) */
             set_mode(b, M_RETREAT, now, NULL);
             WHY("normal: low-life retreat: clear (life %.0f%%), holding", lifePct);
             return 1;
@@ -903,8 +937,8 @@ static int mania_retreat(BotBrain *b, const MCtx *m, const World *w, const Chr *
         return 0;
     }
     if (now < b->mRetRestUntil) return 0;
-    if (!b->mRetSince) { b->mRetSince = now; note(b, D_M_LOWLIFE, "life %.0f%% < %d%%, uid %u near (%d around): retreating until clear", lifePct, C.retreatLifePct, thr->uid, n); }
-    if (now - b->mRetSince > 7000) { b->mRetSince = 0; b->mRetRestUntil = now + 2500; LOGD("%s: normal: retreated 7 s; fighting for 2.5 s", b->name); return 0; }
+    if (!b->mRetSince) { b->mRetSince = now; note(b, D_M_LOWLIFE, "life %.0f%% < %.0f%%, uid %u near (%d around): retreating until clear (4 s at most)", lifePct, retPct, thr->uid, n); }
+    if (now - b->mRetSince > 4000) { b->mRetSince = 0; b->mRetRestUntil = now + 4000; LOGD("%s: normal: retreated 4 s; fighting for 4 s", b->name); return 0; }
     float gx, gz; int useP1 = 0;
     if (p1 && p1->life > 0 && !state_is_hurt(p1->state) && !state_is_down(p1->state)) {
         int side = sgn(thr->pos.x - p1->pos.x); if (!side) side = 1;

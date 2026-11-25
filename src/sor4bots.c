@@ -23,10 +23,11 @@
 #include <stdint.h>
 #include "sor4common.h"
 #include "sor4state.h"
+#include "sor4pads.h"
 #include "sor4brain.h"
 #include "sor4menu.h"
 
-#define SOR4BOTS_VERSION "RageBots v1.1"
+#define SOR4BOTS_VERSION "RageBots v1.2"
 
 /* ---- minimal SDL2 ABI (from SDL 2.32 headers; stable across SDL2) ---- */
 typedef uint8_t Uint8; typedef int16_t Sint16; typedef uint16_t Uint16; typedef uint32_t Uint32;
@@ -260,6 +261,8 @@ static void load_config(void) {
     C.jumpAttacks = GetPrivateProfileIntW(L"Brain", L"JumpAttacks", 1, ini) != 0;
     GetPrivateProfileStringW(L"Brain", L"BotSkill", L"0", buf, 128, ini);   /* v1.1: 0 / Easy (default, the v1.0 bots), 1 / Normal (the new brain; "Mania" still read) */
     C.botSkill = !_wcsicmp(buf, L"Normal") || !_wcsicmp(buf, L"Mania") || !wcscmp(buf, L"1") ? 1 : 0;
+    C.perkWaitSec = clampi(GetPrivateProfileIntW(L"Brain", L"PerkWaitSeconds", 10, ini), 0, 120);   /* v1.2 */
+    C.starSavePct = clampi(GetPrivateProfileIntW(L"Brain", L"StarSaveHealth", 25, ini), 0, 100);     /* v1.2 */
 
     GetPrivateProfileStringW(L"TestBrain", L"JoinButton", L"A", buf, 128, ini); C.joinButton = parse_button(buf, BTN_A);
     C.joinPresses = clampi(GetPrivateProfileIntW(L"TestBrain", L"JoinPresses", 2, ini), 0, 10);
@@ -409,11 +412,29 @@ static void log_fna_slots(const char *why) {
     LOGI("game pad slots (predicted from FNA's first-free rule, %s):%s", why, b);
 }
 
+/* v1.2: one physical pad seen as 2+ SDL devices (Steam Deck / Steam Input, XInput + HIDAPI, remappers) counts once
+   (sor4pads.h); bot pads, SDL virtual pads and duplicates hidden from the game are not counted */
+static DevRec *dev_find(int inst);
 static int count_real_controllers(void) {
-    int n = R.NumJoysticks(), real = 0;
+    int n = R.NumJoysticks(), raw = 0, merged = 0;
+    PadDesc d[32]; if (n > 32) n = 32;
     for (int i = 0; i < n; i++) {
+        PadDesc *p = &d[i]; memset(p, 0, sizeof *p);
         int isVirt = R.JoystickIsVirtual ? R.JoystickIsVirtual(i) : 0;
-        if (!isVirt && R.IsGameController(i)) real++;
+        int inst = R.DevInstanceID ? R.DevInstanceID(i) : -1;
+        DevRec *dr = dev_find(inst);
+        p->skip = isVirt || !R.IsGameController(i) || is_bot_instance(inst) >= 0 || (dr && dr->hidden);
+        if (p->skip) continue;
+        raw++;
+        p->vid = R.DevVendor ? R.DevVendor(i) : 0; p->pid = R.DevProduct ? R.DevProduct(i) : 0;
+        if (R.GetDeviceGUID) { SDL_JoystickGUID g = R.GetDeviceGUID(i); p->drv = (char)g.data[14]; }
+        p->path = R.JoystickPathForIndex ? R.JoystickPathForIndex(i) : NULL;
+    }
+    int real = pads_count_humans(d, n, &merged);
+    static int s_lastRaw = -1, s_lastReal = -1;
+    if (raw != s_lastRaw || real != s_lastReal) {
+        s_lastRaw = raw; s_lastReal = real;
+        if (merged > 0) LOGI("controllers: %d physical device(s) seen, counted as %d human pad(s) (%d duplicate(s) of the same pad: Steam Input / second SDL driver / same path).", raw, real, merged);
     }
     return real;
 }
@@ -1188,7 +1209,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID r) {
              C.attachOnF7 ? "OnF7" : "Auto", C.startActive, C.attachDelayMs, C.settleMs, C.reorderLatePads, C.inputFallbackSeconds, C.legacyDrivers, C.hideDuplicatePads, C.diagnostics,
              C.smart ? "Smart" : "Test", C.dumpState, C.dumpEveryNFrames, C.brainLogMs, C.overlay, C.forceBorderless);
         static const char *const ag[] = { "Low", "Normal", "High" };
-        LOGI("Bot skill: %s (BotSkill=%d; F7 menu \"Bot skill\").", C.botSkill ? "Normal (the v1.1 brain)" : "Easy (the v1.0 bots)", C.botSkill);
+        LOGI("Bot skill: %s (BotSkill=%d; F7 menu \"Bot skill\"). Survival (Normal): PerkWaitSeconds=%d StarSaveHealth=%d%%.", C.botSkill ? "Normal (the v1.2 brain)" : "Easy (the v1.0 bots)", C.botSkill, C.perkWaitSec, C.starSavePct);
         LOGI("Fighting: aggression P2 %s P3 %s P4 %s; specials %d (offensive >= %d%% life, defensive >= %d%%), star moves %d (%s), back attack %s, "
              "pickups %d (food below %d%%, money/weapons after a %d s head start for players), grabs %d, break objects %d, jump attacks %d, weapon throws %d, friendly-fire retaliation %d, retreat below %d%%; P1 watch log every %d ms",
              ag[C.botAggr[0]], ag[C.botAggr[1]], ag[C.botAggr[2]], C.useSpecials, C.specialMinLifePct, C.defSpecialMinLifePct, C.useStars,

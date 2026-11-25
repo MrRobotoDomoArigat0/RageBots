@@ -17,11 +17,30 @@ know where everyone is and how much life they have.
 
 ## Download
 
-Get the ready-made zip (`RageBots-v1.1.zip`) from the **Releases** page of this repository. It contains the built
+Get the ready-made zip (`RageBots-v1.2.zip`) from the **Releases** page of this repository. It contains the built
 `SDL2.dll`, the official `SDL2_real.dll`, the default `SoR4Bots.ini` and a plain-text README. You only need to
 build from source if you want to change the mod.
 
-## What's new in v1.1
+## What's new in v1.2
+
+- **Survival perks (Normal):** the bots wait `PerkWaitSeconds` (10) for a player to pick a perk; if nobody does,
+  one bot takes a perk it doesn't own yet, taking turns by round (P2, P3, P4, skipping a bot that is down). Never
+  while a player stands on a perk, never the revive perk while a player is up, and no stray B on a perk.
+- **Survival revive (Normal):** with every player down, a bot takes the revive perk at once (found by
+  `resuscitatePlayers`, not by screen position) and walks into the portal. With a player up, the bots follow and
+  keep out of the portal.
+- **Survival star moves (Normal):** kept until life is at or below `StarSaveHealth` (25%) or the bot is
+  surrounded; held/juggled emergencies unchanged; Arcade unchanged.
+- **Steam Deck / Steam Input / remappers:** one pad seen as two SDL devices counts once when bots plug in
+  (`src/sor4pads.h`); separate pads are never merged, so a bot never takes a player's slot.
+- **Sloped floors (Easy and Normal):** a learned floor edge only applies near where it was learned and is dropped
+  when a player stands past it; enemies next to a player are always reachable.
+- **Normal:** less low-life retreating, Axel's Dragon Dive only with 2+ enemies in its path, wider/finer dodging
+  of Koobo's depth-flying pipes, Cherry and Floyd use their air specials, breakable crate depth-alignment fix and
+  skipping crates blocked by floor traps, surplus food pickup under 95% life when enough food is safe (or after a
+  Survival wave clears), clearer decision names in the log.
+
+## What was new in v1.1
 
 - **Bot skill: Easy / Normal** (F7 menu, or `BotSkill=0` / `BotSkill=1` in `SoR4Bots.ini`; Easy is the default).
   Easy is exactly the v1.0 bots. Normal is a new, smarter brain (see below).
@@ -47,7 +66,7 @@ jump-slam landing boxes, dodge thrown/flying objects by direction; floor traps l
 - **Combat:** lines up and faces enemies, per-fighter combo strings, launchers and follow-ups, back attacks,
   grabs and throws, jump attacks, specials with care for the life bar, defensive specials and dodges, star moves
   near bosses, in big crowds or in an emergency. Backs off behind player 1 when life is low.
-- **Bot skill:** Easy (the v1.0 bots) or Normal (the smarter v1.1 bots), switched in the F7 menu.
+- **Bot skill:** Easy (the v1.0 bots) or Normal (the smarter bots, with Survival perk handling in v1.2), switched in the F7 menu.
 - **Pickups and weapons:** food (left for player 1 if you need it more), money, weapons and grenades, with a head
   start for players. Melee weapons are mostly swung and only thrown when worn out or the enemy is far away.
 - **Containers:** breaks crates, sinks and other objects near you when there is nothing left to fight.
@@ -150,7 +169,7 @@ x86_64-w64-mingw32-gcc -O2 -Wall -Wextra -Wno-unused-parameter -shared -s \
     -lkernel32 -luser32 -lgdi32
 ```
 
-A clean build from this source with the toolchain above gives an `SDL2.dll` that is identical to the v1.1 release
+A clean build from this source with the toolchain above gives an `SDL2.dll` that is identical to the v1.2 release
 DLL except for the 4-byte link timestamp in the PE header.
 
 To run it you also need `SDL2_real.dll`: download `SDL2-2.32.10-win32-x64.zip` from the SDL GitHub releases

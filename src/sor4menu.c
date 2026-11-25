@@ -96,7 +96,7 @@ int menu_nav(MenuModel *m, int key) {
 int menu_lines(const MenuModel *m, char lines[][96], int colors[], int max) {
     int n = 0;
 #define ADD(col, ...) do { if (n < max) { snprintf(lines[n], 96, __VA_ARGS__); colors[n] = (col); n++; } } while (0)
-    ADD(MC_TITLE, "RAGE BOTS v1.1");   /* v1.1 release */
+    ADD(MC_TITLE, "RAGE BOTS v1.2");   /* v1.2 release */
     ADD(MC_TEXT, "By: MrRobotoDomoArigato");
     ADD(MC_GREY, "F7 close, arrows, Enter");
     ADD(MC_TEXT, "Where: %s", m->where[0] ? m->where : "-");

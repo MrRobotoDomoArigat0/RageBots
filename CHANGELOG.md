@@ -1,5 +1,46 @@
 # Changelog
 
+## v1.2 (2026-11-25)
+
+### Survival mode (Normal bot skill)
+- Perks are read from the game (`ActivableInstance` / `ActivableData` / `SurvivalBonus`, `PlayerState.bonusIdArray`).
+- The bots wait `PerkWaitSeconds` (new, default 10) for a player to pick. If nobody does, one bot walks onto a perk
+  it doesn't own yet and presses B. The picker rotates by round (`round % living bots`, P2/P3/P4 order, bots that
+  are down skipped). No pick while a player stands on a perk (and 3 s more after they step off); never the revive
+  perk while a player is up; B pressed by any other rule while standing on a perk is dropped.
+- Every player down: a living bot takes the revive perk at once (identified by `resuscitatePlayers` / bonus 0,
+  never by position), then walks into the portal (`isSurvivalPortal`). With a player up the bots follow as usual
+  and step out of the portal.
+- Star moves kept until life <= `StarSaveHealth` (new, default 25) or surrounded; held/juggled emergencies and
+  Arcade unchanged.
+- Survival logging kept; transition-timer ticks moved to Debug.
+
+### Controllers
+- Steam Deck / Steam Input / remappers: physical pads are de-duplicated before counting free player slots
+  (same path or serial; same vendor:product through different SDL drivers; Steam virtual pads vs physical pads).
+  Two separate identical pads on one driver are never merged.
+
+### Both skills
+- Sloped floors: learned floor edges apply within 3 x (was 8) with a margin growing with x distance, are dropped
+  when a player stands past them, and an enemy next to a player is never "off the floor".
+
+### Normal bot skill
+- Low-life retreat from 2/3 of `RetreatLifePercent`, 4 s at most then 4 s fighting, shorter hysteresis.
+- Axel's Dragon Dive only with 2+ enemies in its path (or over a floor trap).
+- Koobo's pipes: path width 2.1 for objects flying in depth (bots were hit at up to 1.95 to the side), path checked
+  every frame (3-frame steps skipped spots), hovering pipes' depth column widened.
+- Cherry (Air Townshend) and Floyd (Thunder Pounce) use their air special on a lone target or a group.
+- Breakables: reset `breakZAt` when breakables didn't run on the previous frame (both skills, needed for correctness
+  when interrupted), Normal uses a 500 ms depth-stall check, caps the wall-alignment `dz` fallback at 2.5 lanes
+  (stops air-punching crates from 1+ lane away), and skips crates inside or blocked by active trap zones.
+- Food (Normal): bots missing health (< 95%) may pick up food above `FoodLifePercent` when safe floor food covers
+  everyone hurt (and no human is critical), or when surplus safe food remains after a Survival wave clears.
+- Log: air special named per fighter, "hovering pipe", "out of a flying object's path", new Survival decisions.
+
+### Other
+- F7 menu title: RAGE BOTS v1.2. New tests: `pads_test`, and Survival perk / revive / portal / rotation / star
+  saving / dive / air special / pipe / retreat / sloped-floor / breakable-trap / surplus-food checks in `mania_test`.
+
 ## v1.1 (2026-11-13)
 
 ### Bot skill: Easy / Normal

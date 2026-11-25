@@ -35,6 +35,7 @@ typedef struct {
     int jumpAttacks;                     /* m6: JumpAttacks (jump-ins, air hits, jump-cancel combos, air special) */
     int friendlyRetaliate;               /* m7.4: FriendlyRetaliate (friendly fire on: a bot hits a human back once per hit taken) */
     int weaponThrows;                    /* m7.2: WeaponThrows (throw held melee weapons at range / before they break) */
+    int perkWaitSec, starSavePct;        /* v1.2: [Brain] PerkWaitSeconds (Survival perks, Normal), StarSaveHealth (Survival star saving, Normal) */
     int botSkill;                        /* v1.1 (m8): [Brain] BotSkill 0 = Easy (the v1.0 bots, unchanged), 1 = Normal (sor4mania.inc; called Mania internally) */
     /* [TestBrain] (also the fallback when the game state can't be read) */
     int joinButton, joinPresses, testAttackButton, attackIntervalMs, walkMs, jumpEvery;
