@@ -990,3 +990,61 @@ static int mania_retreat(BotBrain *b, const MCtx *m, const World *w, const Chr *
     WHY("normal: low-life retreat (life %.0f%%, uid %u near): to (%.1f, %.1f)%s", lifePct, thr->uid, gx, gz, useP1 ? " behind P1" : ", away from the enemies");
     return 1;
 }
+
+/* v1.3 Normal: varied and longer strings, so the bots don't repeat the same X x n string all the time.
+   Called with the plain string already in stp[0..*k) (X x n, n 2..5, nothing in hand, no shield in front). Picks one
+   variant at random (b->rng), never the same non-plain one twice in a row, and falls back to the plain string when
+   the variant's rules say no (specials: special_ok = life / green / heavy rules; jumps: jump_ok budget; grabs: the
+   walk-in grab rules; blitz: the profile has one). Rewrites stp and *k and returns:
+     1 plain string, 2 long (X x (n-1), string reset, X x n), 3 X x (n-1) + back attack (enemy behind),
+     4 X x (n-1) + jump kick, 5 X x (n-2) + blitz, 6 X x (n-1) + special, 7 X x 2 + walk-in grab.
+   *ms = how long the whole thing takes (comboEnd). */
+static int mania_vary_string(BotBrain *b, const CharProfile *pf, const Chr *me, const Chr *tgt, SeqStep *stp, int *k, int n, uint16_t per,
+                             int side, int shieldUp, int nearCount, int nearBehind, float lifePct, float banked, uint64_t now, uint64_t *ms) {
+    (void)me; (void)side;
+    b->rng = b->rng * 1103515245u + 12345u + (uint32_t)now + (uint32_t)b->index * 7919u;
+    int r = (int)((b->rng >> 16) % 100);
+    int okBack = C.backAttack && nearBehind > 0;
+    int okJump = C.jumpAttacks && !tgt->boss && !tgt->superArmor && jump_ok(b, now, tgt->uid);
+    int okBlitz = pf->blitz && pf->grabStyle != GS_MAX && n >= 3 && (!b->lastVarBlitz || now - b->lastVarBlitz > 4000) && (!b->lastBlitz || now - b->lastBlitz > 2000);
+    int okSpec = nearCount >= 1 && special_ok(b, 0, lifePct, now) && (!b->lastVarSpecial || now - b->lastVarSpecial > 7000);
+    int okGrab = C.useGrabs && !shieldUp && !tgt->boss && !tgt->superArmor && !tgt->cantBeGrabbed && (!b->lastGrabTry || now - b->lastGrabTry > 3000);
+    int v;
+    if (r < 30) v = 1; else if (r < 55) v = 2; else if (r < 65) v = 3; else if (r < 75) v = 4; else if (r < 84) v = 5; else if (r < 92) v = 6; else v = 7;
+    if (v > 1 && v == b->varLast) v = 2;                 /* no fancy ender twice in a row: the long string instead */
+    if ((v == 3 && !okBack) || (v == 4 && !okJump) || (v == 5 && !okBlitz) || (v == 6 && !okSpec) || (v == 7 && !okGrab)) v = r % 2 ? 2 : 1;
+    b->varLast = v;
+    if (v == 1) { *ms = (uint64_t)n * per; return 1; }
+    uint16_t h = (uint16_t)(per / 2), g = (uint16_t)(per - per / 2);
+    int m = v == 5 ? n - 2 : v == 7 ? 2 : n - 1, q = 0;
+    if (m < 1) m = 1;
+    for (int i = 0; i < m; i++) { stp[q++] = (SeqStep){ h, 0, 0, SB_X }; stp[q++] = (SeqStep){ g, 0, 0, 0 }; }
+    const char *what = "";
+    switch (v) {
+    case 2:   /* the string resets after a short pause without its last hit; the full string follows: 2n-1 hits */
+        stp[q++] = (SeqStep){ 230, 0, 0, 0 };
+        for (int i = 0; i < n && q < 19; i++) { stp[q++] = (SeqStep){ h, 0, 0, SB_X }; stp[q++] = (SeqStep){ g, 0, 0, 0 }; }
+        what = "long string"; break;
+    case 3:   /* finish on the enemy behind */
+        if (C.backAttack == 2) { stp[q++] = (SeqStep){ 80, -1, 0, SB_X }; } else { stp[q++] = (SeqStep){ 90, 0, 0, SB_RT }; }
+        stp[q++] = (SeqStep){ 260, 0, 0, 0 }; b->lastBack = now; what = "string + back attack"; break;
+    case 4:   /* hop forward with a kick */
+        stp[q++] = (SeqStep){ 70, 1, 0, SB_A }; stp[q++] = (SeqStep){ 170, 1, 0, 0 }; stp[q++] = (SeqStep){ 70, 1, 0, SB_X }; stp[q++] = (SeqStep){ 300, 0, 0, 0 };
+        used_jump(b, 27, now); what = "string + jump kick"; break;
+    case 5:   /* fwd, fwd + X */
+        stp[q++] = (SeqStep){ 50, 1, 0, 0 }; stp[q++] = (SeqStep){ 40, 0, 0, 0 }; stp[q++] = (SeqStep){ 80, 1, 0, SB_X }; stp[q++] = (SeqStep){ 450, 0, 0, 0 };
+        b->lastBlitz = now; b->lastVarBlitz = now; if (pf->blitzThenGrab) b->lastGrabTry = 0; what = "string + blitz"; break;
+    case 6:   /* cancel into a special: forward special if the fighter has a good one, else the neutral one */
+        if (pf->fwdSpecial) stp[q++] = (SeqStep){ 90, 1, 0, SB_Y }; else stp[q++] = (SeqStep){ 90, 0, 0, SB_Y };
+        stp[q++] = (SeqStep){ 500, 0, 0, 0 };
+        used_special(b, lifePct, banked, now); b->lastVarSpecial = now; what = pf->fwdSpecial ? "string + forward special" : "string + special"; break;
+    case 7:   /* two hits, then walk into it for a grab (the grab logic takes over: 1-3 knees, then a throw) */
+        stp[q++] = (SeqStep){ 380, 1, 0, 0 }; stp[q++] = (SeqStep){ 60, 0, 0, 0 };
+        b->lastGrabTry = now; what = "2 hits + grab"; break;
+    }
+    *k = q;
+    uint64_t t = 0; for (int i = 0; i < q; i++) t += stp[i].ms;
+    *ms = t;
+    note(b, D_M_VARIED, "%s on uid %u (%d hits)", what, tgt->uid, v == 2 ? m + n : m);
+    return v;
+}

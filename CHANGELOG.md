@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.3 (2026-11-26)
+
+### Both skills
+- Stuck-on-walls watchdog (`walk_watchdog()` in `walk_to()`): while `walk_to` pushes the stick and the bot is free
+  to walk (not hurt, grabbing, held, airborne or scripted, not approaching an enemy, not working a breakable), no
+  progress (0.15 along the pushed x, or in depth for depth-only walks) for 0.9 s -> 0.5 s depth step (1.5 lanes;
+  away from a known floor edge) -> 0.7 s later a hop toward the goal -> 0.7 s later that goal is given up for 3 s
+  (the bot stands instead of pushing; a pickup goal is marked bad). Progress resets it; the next attempt uses the
+  other depth side. Decision "stuck: walking around". The approach keeps its own detours / hops / unreachable list.
+- `RetreatLifePercent` default 0 (was 30).
+- `PlayerItemHeadStartSec` default 7 (was 10); new `WeaponHeadStartSec` (default 10) for weapons.
+
+### Normal bot skill
+- Varied strings: plain 30%, long 25%, back attack 10%, jump kick 10%, blitz 9%, special 8%, two hits + grab 8%;
+  never the same fancy ender twice in a row; each falls back to long/plain when its own rule says no. Decision
+  "normal: varied string". Grabs: 1-3 knees at random.
+- Stars: after the head start, taken when the nearest enemy is beyond 1.5 attack ranges or the star is nearer than
+  any enemy and no attack is coming (within 0.8 screen), ranked like food.
+- `PerkWaitSeconds` default 7 (was 10).
+
 ## v1.2 (2026-11-25)
 
 ### Survival mode (Normal bot skill)

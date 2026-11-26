@@ -27,7 +27,7 @@
 #include "sor4brain.h"
 #include "sor4menu.h"
 
-#define SOR4BOTS_VERSION "RageBots v1.2"
+#define SOR4BOTS_VERSION "RageBots v1.3"
 
 /* ---- minimal SDL2 ABI (from SDL 2.32 headers; stable across SDL2) ---- */
 typedef uint8_t Uint8; typedef int16_t Sint16; typedef uint16_t Uint16; typedef uint32_t Uint32;
@@ -234,7 +234,7 @@ static void load_config(void) {
     GetPrivateProfileStringW(L"Brain", L"SpecialButton", L"Y", buf, 128, ini); C.specialButton = parse_button(buf, BTN_Y);
     C.useSpecials = GetPrivateProfileIntW(L"Brain", L"UseSpecials", 1, ini) != 0;
     C.specialMinLifePct = clampi(GetPrivateProfileIntW(L"Brain", L"SpecialMinLifePercent", 60, ini), 0, 101);
-    C.retreatLifePct = clampi(GetPrivateProfileIntW(L"Brain", L"RetreatLifePercent", 30, ini), 0, 100);
+    C.retreatLifePct = clampi(GetPrivateProfileIntW(L"Brain", L"RetreatLifePercent", 0, ini), 0, 100);
     C.attackRange = ini_float(L"Brain", L"AttackRange", ini);
     C.laneTolerance = ini_float(L"Brain", L"LaneTolerance", ini);
     C.followDistance = ini_float(L"Brain", L"FollowDistance", ini);
@@ -254,14 +254,15 @@ static void load_config(void) {
     C.usePickups = GetPrivateProfileIntW(L"Brain", L"UsePickups", 1, ini) != 0;
     C.useGrabs = GetPrivateProfileIntW(L"Brain", L"UseGrabs", 1, ini) != 0;
     C.foodLifePct = clampi(GetPrivateProfileIntW(L"Brain", L"FoodLifePercent", 75, ini), 0, 100);
-    C.itemHeadStartMs = 1000 * clampi(GetPrivateProfileIntW(L"Brain", L"PlayerItemHeadStartSec", 10, ini), 0, 600);   /* m5 */
+    C.itemHeadStartMs = 1000 * clampi(GetPrivateProfileIntW(L"Brain", L"PlayerItemHeadStartSec", 7, ini), 0, 600);   /* m5; v1.3: 7 s (money, stars) */
+    C.weaponHeadStartMs = 1000 * clampi(GetPrivateProfileIntW(L"Brain", L"WeaponHeadStartSec", 10, ini), 0, 600);   /* v1.3: weapons keep 10 s */
     C.breakObjects = GetPrivateProfileIntW(L"Brain", L"BreakObjects", 1, ini) != 0;
     C.weaponThrows = GetPrivateProfileIntW(L"Brain", L"WeaponThrows", 1, ini) != 0;   /* m7.2 */
     C.friendlyRetaliate = GetPrivateProfileIntW(L"Brain", L"FriendlyRetaliate", 1, ini) != 0;   /* m7.4 */
     C.jumpAttacks = GetPrivateProfileIntW(L"Brain", L"JumpAttacks", 1, ini) != 0;
     GetPrivateProfileStringW(L"Brain", L"BotSkill", L"0", buf, 128, ini);   /* v1.1: 0 / Easy (default, the v1.0 bots), 1 / Normal (the new brain; "Mania" still read) */
     C.botSkill = !_wcsicmp(buf, L"Normal") || !_wcsicmp(buf, L"Mania") || !wcscmp(buf, L"1") ? 1 : 0;
-    C.perkWaitSec = clampi(GetPrivateProfileIntW(L"Brain", L"PerkWaitSeconds", 10, ini), 0, 120);   /* v1.2 */
+    C.perkWaitSec = clampi(GetPrivateProfileIntW(L"Brain", L"PerkWaitSeconds", 7, ini), 0, 120);   /* v1.2 */
     C.starSavePct = clampi(GetPrivateProfileIntW(L"Brain", L"StarSaveHealth", 25, ini), 0, 100);     /* v1.2 */
 
     GetPrivateProfileStringW(L"TestBrain", L"JoinButton", L"A", buf, 128, ini); C.joinButton = parse_button(buf, BTN_A);
@@ -1209,7 +1210,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID r) {
              C.attachOnF7 ? "OnF7" : "Auto", C.startActive, C.attachDelayMs, C.settleMs, C.reorderLatePads, C.inputFallbackSeconds, C.legacyDrivers, C.hideDuplicatePads, C.diagnostics,
              C.smart ? "Smart" : "Test", C.dumpState, C.dumpEveryNFrames, C.brainLogMs, C.overlay, C.forceBorderless);
         static const char *const ag[] = { "Low", "Normal", "High" };
-        LOGI("Bot skill: %s (BotSkill=%d; F7 menu \"Bot skill\"). Survival (Normal): PerkWaitSeconds=%d StarSaveHealth=%d%%.", C.botSkill ? "Normal (the v1.2 brain)" : "Easy (the v1.0 bots)", C.botSkill, C.perkWaitSec, C.starSavePct);
+        LOGI("Bot skill: %s (BotSkill=%d; F7 menu \"Bot skill\"). Survival (Normal): PerkWaitSeconds=%d StarSaveHealth=%d%%.", C.botSkill ? "Normal (the new brain)" : "Easy (the v1.0 bots)", C.botSkill, C.perkWaitSec, C.starSavePct);
         LOGI("Fighting: aggression P2 %s P3 %s P4 %s; specials %d (offensive >= %d%% life, defensive >= %d%%), star moves %d (%s), back attack %s, "
              "pickups %d (food below %d%%, money/weapons after a %d s head start for players), grabs %d, break objects %d, jump attacks %d, weapon throws %d, friendly-fire retaliation %d, retreat below %d%%; P1 watch log every %d ms",
              ag[C.botAggr[0]], ag[C.botAggr[1]], ag[C.botAggr[2]], C.useSpecials, C.specialMinLifePct, C.defSpecialMinLifePct, C.useStars,

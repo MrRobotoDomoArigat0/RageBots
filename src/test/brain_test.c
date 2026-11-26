@@ -80,7 +80,7 @@ int main(void) {
     C.specialMinLifePct = 60; C.defSpecialMinLifePct = 40; C.retreatLifePct = 30; C.retreatMaxMs = 2500; C.comboHits = 4; C.comboTapMs = 110; C.comboPauseMs = 350;
     C.joinButton = BTN_A; C.joinPresses = 2; C.focusGraceMs = 0; C.resumeGraceMs = 0; C.starButton = BTN_RB; C.starMode = 0; C.backAttack = 1;
     C.useStars = 1; C.usePickups = 1; C.useGrabs = 1; C.foodLifePct = 75; C.brainLogMs = 0;
-    C.itemHeadStartMs = 0; C.breakObjects = 1; C.jumpAttacks = 1; C.weaponThrows = 1;
+    C.itemHeadStartMs = 0; C.weaponHeadStartMs = 0; C.breakObjects = 1; C.jumpAttacks = 1; C.weaponThrows = 1;
     brain_set_focus(1, 0);
     Tally t;
 
@@ -200,7 +200,7 @@ int main(void) {
         Chr *pr[3]; float px[3] = { 2.6f, 5.7f, 12.2f }, pz[3] = { -4.8f, -5.7f, -5.1f };
         for (int i = 0; i < 3; i++) { pr[i] = mk(2 + i, 41 + i, 1, -1, px[i], pz[i], 1, CS_STANDWALK); pr[i]->btRoot = 1; pr[i]->lineOfSight = 1; }
         int up = 0, xs = 0; uint32_t tg = 0;
-        for (int fr = 0; fr < 180; fr++, now += 16) { w.frames++; brain_think(&bb[0], bb, 3, &w, 1, now, &out); if (out.axis[AX_LY] < -16000) up++; if (out.btn[BTN_X]) xs++; if (bb[0].targetUid) tg = bb[0].targetUid; }
+        for (int fr = 0; fr < 180; fr++, now += 16) { w.frames++; brain_think(&bb[0], bb, 3, &w, 1, now, &out); if (out.axis[AX_LY] < -16000 && !(bb[0].wdStage == 1 && now < bb[0].wdUntil)) up++;   /* v1.3: not the watchdog's depth step (the bot never moves here) */ if (out.btn[BTN_X]) xs++; if (bb[0].targetUid) tg = bb[0].targetUid; }
         CHECK(!up && !xs && !tg && dec(D_CAGED) >= 1, "m7.2 3 prisoners behind the bars (btRoot 1, still): no target (%u), no walking up to the bars (%d frames), noted %d", tg, up, dec(D_CAGED));
         /* released: the door opens, root 0, it walks out -> fought */
         pr[0]->btRoot = 0; pr[0]->stickY = 1.0f; pr[0]->pos.z = 0.5f; pr[0]->pos.x = 1.5f;
@@ -437,8 +437,8 @@ int main(void) {
     mk(2, 63, 1, -1, 2.0f, -3.0f, -1, CS_STANDWALK);
     run(60 * 11, &t, NULL);
     { int i = -1; for (int k = 0; k < 12; k++) if (bb[0].unreach[k].uid == 63) i = k;
-      CHECK(dec(D_DETOUR) == 2 && t.btn[BTN_A] == 2 && dec(D_UNREACHABLE) == 1 && i >= 0 && bb[0].unreach[i].until > now + 50000 && bb[0].targetUid != 63,
-            "m5: stuck: detours %d, hops %d, unreachable %d (ignored %llu s more)", dec(D_DETOUR), t.btn[BTN_A], dec(D_UNREACHABLE), i >= 0 ? (unsigned long long)((bb[0].unreach[i].until - now) / 1000) : 0ULL); }
+      CHECK(dec(D_DETOUR) == 2 && t.btn[BTN_A] == 2 + (dec(D_WALLSTUCK) ? 1 : 0) && dec(D_UNREACHABLE) == 1 && i >= 0 && bb[0].unreach[i].until > now + 50000 && bb[0].targetUid != 63,
+            "m5: stuck: detours %d, hops %d (+1 watchdog hop following P1 if it stepped: %d), unreachable %d (ignored %llu s more)", dec(D_DETOUR), t.btn[BTN_A], dec(D_WALLSTUCK), dec(D_UNREACHABLE), i >= 0 ? (unsigned long long)((bb[0].unreach[i].until - now) / 1000) : 0ULL); }
 
     /* m5-3. a desk in the way: the detour moves us along the other axis, and we get there */
     world_reset(); bot_reset(1); g_me = &w.ch[1];

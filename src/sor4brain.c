@@ -324,6 +324,51 @@ static void wall_learn(BotBrain *b, const Chr *me, int dir) {
     if (dir > 0 && me->pos.z >= s_fl.hi - 0.15f && (!s_fl.wHi || fabsf_(s_fl.wHiZ - me->pos.z) > 0.1f || fabsf_(s_fl.wHiX - me->pos.x) > 4.0f)) {
         s_fl.wHi = 1; s_fl.wHiZ = me->pos.z; s_fl.wHiX = me->pos.x; LOGI("%s: floor edge: can't walk above z %.2f at x %.1f (pushed 0.45 s without moving)", b->name, me->pos.z, me->pos.x); }
 }
+/* v1.3: stuck-on-walls watchdog for every walk (following P1, pickups, retreat, perks, portal, making way...), Easy and
+   Normal. The approach to an enemy has its own (detours, hops, unreachable) and breakables their own nudges: skipped.
+   Only while walk_to pushes the stick and the bot is free to walk (not hurt, grabbing, held, airborne or scripted).
+   No progress (0.15 in x + z) for 0.9 s -> step 1.5 lanes in depth (0.5 s, sides alternate, away from a known floor
+   edge) -> still stuck 0.7 s later: a hop toward the goal -> still stuck 0.7 s later: give that goal up for 3 s (stand
+   instead of pushing; pickups mark the item bad). Progress resets it. */
+static void note(BotBrain *b, int d, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+static void walk_watchdog(BotBrain *b, const Chr *me, float tx, float tz, PadOut *o) {
+    uint64_t now = g_nowMs;
+    int sx = o->axis[AX_LX] > 0 ? 1 : o->axis[AX_LX] < 0 ? -1 : 0, sy = o->axis[AX_LY] > 0 ? 1 : o->axis[AX_LY] < 0 ? -1 : 0;
+    if (b->wdGiveUntil && now < b->wdGiveUntil && fabsf_(tx - b->wdGiveX) < 1.0f && fabsf_(tz - b->wdGiveZ) < 0.6f) {   /* given up: don't push there */
+        o->axis[AX_LX] = 0; o->axis[AX_LY] = 0; b->wdTick = b->fightTick; b->wdAt = 0; return;
+    }
+    int skip = (!sx && !sy) || b->mode == M_APPROACH || (b->breakUid && b->breakClaimAt == now) || state_is_hurt(me->state) || me->grabbing > 0 ||
+               me->grabbedBy || me->pos.y > 0.05f || me->scripted;
+    if (b->wdTick == b->fightTick) { if (!skip && b->wdStage == 1 && now < b->wdUntil) o->axis[AX_LY] = (int16_t)(b->wdSide * b->zSign * STICK); return; }   /* 2nd walk this frame */
+    int cont = b->wdTick + 1 == b->fightTick;
+    b->wdTick = b->fightTick;
+    if (skip || !cont || !b->wdAt || now < b->wdAt) { b->wdAt = now; b->wdX = me->pos.x; b->wdZ = me->pos.z; b->wdStage = 0; b->wdUntil = 0; return; }
+    /* progress: along the x we push (x walks), else along the depth we push; any 0.15 resets the watchdog */
+    float prog = sx ? (me->pos.x - b->wdX) * (float)sx : fabsf_(me->pos.z - b->wdZ);
+    if (prog > 0.15f || (!sx && b->wdStage == 0 && fabsf_(me->pos.x - b->wdX) > 0.15f)) { b->wdAt = now; b->wdX = me->pos.x; b->wdZ = me->pos.z; b->wdStage = 0; b->wdUntil = 0; return; }
+    if (now < b->wdUntil) {                                   /* a step in progress */
+        if (b->wdStage == 1) o->axis[AX_LY] = (int16_t)(b->wdSide * b->zSign * STICK);
+        else if (b->wdStage == 2 && now + 520 < b->wdUntil) o->btn[prof_btn(b, 2, C.jumpButton)] = 1;   /* jump held ~80 ms */
+        return;
+    }
+    if (now - b->wdAt < (b->wdStage == 0 ? 900u : 1200u)) return;
+    if (b->wdStage == 0) {
+        int side = b->wdSide ? b->wdSide : (b->index % 2 ? -1 : 1);
+        if (s_fl.known && me->pos.z >= s_fl.hi - 0.3f) side = -1; else if (s_fl.known && me->pos.z <= s_fl.lo + 0.3f) side = 1;
+        b->wdSide = side; b->wdStage = 1; b->wdUntil = now + 500; b->wdAt = now; b->wdX = me->pos.x; b->wdZ = me->pos.z;
+        o->axis[AX_LY] = (int16_t)(side * b->zSign * STICK);
+        note(b, D_WALLSTUCK, "no progress for 0.9 s at (%.1f, %.1f) going to (%.1f, %.1f): stepping %s in depth", me->pos.x, me->pos.z, tx, tz, side > 0 ? "+z" : "-z");
+    } else if (b->wdStage == 1) {
+        b->wdStage = 2; b->wdUntil = now + 600; b->wdAt = now;
+        o->btn[prof_btn(b, 2, C.jumpButton)] = 1;
+        LOGI("%s: stuck: still no progress at (%.1f, %.1f) going to (%.1f, %.1f): hop", b->name, me->pos.x, me->pos.z, tx, tz);
+    } else {
+        b->wdStage = 0; b->wdAt = 0; b->wdUntil = 0; b->wdGiveUntil = now + 3000; b->wdGiveX = tx; b->wdGiveZ = tz; b->wdGaveAt = now;
+        b->wdSide = -b->wdSide;                                /* next time: the other depth side */
+        o->axis[AX_LX] = 0; o->axis[AX_LY] = 0;
+        LOGI("%s: stuck: can't reach (%.1f, %.1f) from (%.1f, %.1f): giving that goal up for 3 s", b->name, tx, tz, me->pos.x, me->pos.z);
+    }
+}
 static void walk_to(BotBrain *b, const Chr *me, float tx, float tz, float tolX, float tolZ, PadOut *o) {
     dbg_walkLo = s_walkLo; dbg_walkHi = s_walkHi;
     if (s_ntz) {                                         /* m6.7: trap zones */
@@ -374,6 +419,7 @@ static void walk_to(BotBrain *b, const Chr *me, float tx, float tz, float tolX, 
         o->axis[AX_LY] = ly;
         wall_learn(b, me, sgn(dz));
     } else wall_learn(b, me, 0);
+    walk_watchdog(b, me, tx, tz, o);
 }
 /* learn which stick-y direction increases z (screen depth) from actual movement */
 /* m6.6: an enemy up in a jump attack. Logs (stage 1/2 sub-boss uid 96/97/102/116 in m5.1-run1, m6-run1b, m6.2-run1c,
@@ -707,13 +753,14 @@ const char *const k_dec_names[D_COUNT] = { "combo", "launcher", "blitz", "back a
     "grenade avoided", "run", "dash", "pogo", "juggle", "pull (fwd+Y)", "double grab", "stun grenade", "retreat",
     "unreachable", "detour", "shield: flank", "shield: grab", "jump attack", "breakable", "money", "chain kept",
     "jump-in", "air attack", "jump-cancel combo", "air special", "crowd jump kick", "anti-air: jumps paused", "made way for P1",
-    "breakable: lined up", "breakable: missed, re-aligning", "food left for a lower bot", "spread: other side", "enemy down: waiting", "jump slam: cleared its landing spot", "shield", "trap: no-walk zone", "not released: hanging back", "explosive barrel", "off the floor: not chased", "robot part", "robot leg up: keeping out", "retaliate",
+    "breakable: lined up", "breakable: missed, re-aligning", "food left for a lower bot", "spread: other side", "enemy down: waiting", "jump slam: cleared its landing spot", "shield", "trap: no-walk zone", "not released: hanging back", "explosive barrel", "off the floor: not chased", "robot part", "robot leg up: keeping out", "retaliate", "stuck: walking around",
     "normal: one side", "normal: back to the wall", "normal: special follow-up", "normal: step away after special", "normal: dragon wing panic",
     "normal: off its row", "normal: grand upper (spaced)", "normal: grand upper catch", "normal: throw", "normal: forward special combo", "normal: push to edge",
     "normal: air special",
     "normal: out of a heavy's lane", "normal: out of a flying object's path", "normal: diagonal approach", "normal: baiting a heavy", "normal: low-life retreat", "normal: unstacking",
     "normal: forward special (gap closer / pull)", "normal: out of a leap landing", "normal: hovering pipe", "normal: trap zone from the hit source", "normal: pickup in a trap zone", "normal: green health lock",
-    "normal: survival perk", "normal: survival portal", "normal: star kept (survival)" };
+    "normal: survival perk", "normal: survival portal", "normal: star kept (survival)",
+    "normal: varied string" };
 /* m5: escalating "can't reach it" memory (caged prisoners, enemies behind a fence, objects out of the walkable area) */
 static int unreach_find(const BotBrain *b, uint32_t uid) { for (int i = 0; i < 12; i++) if (b->unreach[i].uid == uid && uid) return i; return -1; }
 static int unreach_now(const BotBrain *b, uint32_t uid, uint64_t now) { int i = unreach_find(b, uid); return i >= 0 && now < b->unreach[i].until; }
@@ -1649,7 +1696,8 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
     /* ---- 5. holding an enemy ---- */
     if (me->grabbing > 0 && (!b->grabStart || now - b->grabStart < 4000)) {
         int dir = me->facing ? me->facing : 1, front = 0, back = 0;
-        if (!b->grabStart) { b->grabStart = now; b->grabHits = 0; b->grabTarget = me->grabUid; b->doubleGrabUntil = 0; note(b, D_GRAB, "holding uid %u", me->grabUid); }
+        if (!b->grabStart) { b->grabStart = now; b->grabHits = 0; b->grabTarget = me->grabUid; b->doubleGrabUntil = 0; note(b, D_GRAB, "holding uid %u", me->grabUid);
+                            if (C.botSkill == 1) { b->rng = b->rng * 1103515245u + 12345u + (uint32_t)now; b->grabKneeMax = 1 + (int)((b->rng >> 16) % 3); } }   /* v1.3 Normal: 1-3 knees */
         const Chr *other = NULL; float oBest = 1e30f;
         for (int i = 0; i < w->nch; i++) {
             const Chr *c = &w->ch[i];
@@ -1668,7 +1716,7 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
             if (now < b->doubleGrabUntil) { walk_to(b, me, other->pos.x, other->pos.z, 0.0f, lane * 0.3f, o); WHY("double grab: walking into uid %u", other->uid); return; }
         }
         if (C.botSkill == 1 && mania_throw(b, w, me, pf, dir, front, back, range, lane, now, o)) return;   /* v1.1 Mania */
-        if (b->grabHits < 2) {
+        if (b->grabHits < (C.botSkill == 1 && b->grabKneeMax > 0 ? b->grabKneeMax : 2)) {
             b->grabHits++; GO(12, dir, 0, { 70, 0, 0, SB_X }, { 160, 0, 0, 0 });
             note(b, D_GRABHIT, "hit %d on held uid %u", b->grabHits, me->grabUid); seq_run(b, now, o); WHY("grab: knee"); return;
         }
@@ -1742,7 +1790,8 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
             uint64_t age = pick_age(p->addr, now);            /* m5: the human's head start on money and weapons */
             if (p->held || is_bad_pick(b, p->addr, now) || unreach_now(b, pick_key(p->addr), now) || fabsf_(p->pos.x - anchorX) > screenW * 0.55f || p->pos.y > sizeY * 0.1f) continue;
             if (C.botSkill == 1 && !(p->kind == PK_GRENADE && p->ticking) && mania_pick_in_trap(b, p, now)) continue;   /* v1.1 stage 4 Normal (v1.1-run3: P2 died walking to money on trap 19) */
-            if (p->kind == PK_FOOD || (p->kind == PK_GRENADE && p->ticking)) { if (p->pos.x < camLo - range * 0.3f || p->pos.x > camHi + range * 0.3f) continue; }   /* m6.2: food: camera limits only */
+            int mStar = C.botSkill == 1 && p->kind == PK_STAR;   /* v1.3 Normal: stars have their own rule (camera limits, enemy gate by distance) */
+            if (p->kind == PK_FOOD || (p->kind == PK_GRENADE && p->ticking) || mStar) { if (p->pos.x < camLo - range * 0.3f || p->pos.x > camHi + range * 0.3f) continue; }   /* m6.2: food: camera limits only */
             else if (p->pos.x < s_walkLo - range * 0.2f || p->pos.x > s_walkHi + range * 0.2f) continue;   /* m6.2: money/weapons not ahead of P1; m6.3: must be reachable inside the walk limits */
             else if (tgt) {   /* m6.3 (m6.2-run1c, sub-boss): an enemy is engaged: no weapons/money at the screen edge or ahead of P1 (away from the fight) */
                 if (w->haveCam && (p->pos.x < w->cam.x - screenW * 0.5f + range * 1.5f || p->pos.x > w->cam.x + screenW * 0.5f - range * 1.5f)) continue;
@@ -1787,11 +1836,20 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
                 for (int k = 0; k < nall; k++) if (&all[k] != b && all[k].goalPick == p->addr) taken = 1;
                 if (taken || (nearestEnemy < range * 1.5f && lifePct > 35.0f)) continue;
                 if (d < gBest) { gBest = d; goal = p; gKind = PK_FOOD; }
+            } else if (mStar) {
+                /* v1.3 Normal: a star after the players' head start (PlayerItemHeadStartSec, 7 s): taken when no enemy is within
+                   1.5 ranges, or when the star is closer than the nearest enemy and nothing is attacking us; up to 0.8
+                   screen away; ranked like food (no money penalty) */
+                if (age < (uint64_t)C.itemHeadStartMs || d >= screenW * 0.8f) continue;
+                if (!(nearestEnemy > range * 1.5f || (d < nearestEnemy && !incoming))) continue;
+                int taken = 0;
+                for (int k = 0; k < nall; k++) if (&all[k] != b && all[k].goalPick == p->addr) taken = 1;
+                if (!taken && d < gBest) { gBest = d; goal = p; gKind = PK_STAR; }
             } else if ((p->kind == PK_SCORE || p->kind == PK_STAR) && age >= (uint64_t)C.itemHeadStartMs && nearestEnemy > range * 1.5f && d < screenW * 0.6f) {
                 int taken = 0;
                 for (int k = 0; k < nall; k++) if (&all[k] != b && all[k].goalPick == p->addr) taken = 1;
                 if (!taken && d + range < gBest) { gBest = d + range; goal = p; gKind = p->kind; }
-            } else if (p->kind == PK_WEAPON && !me->heldAddr && d < range * 4.0f && nearestEnemy > range * 1.2f && age >= (uint64_t)C.itemHeadStartMs &&
+            } else if (p->kind == PK_WEAPON && !me->heldAddr && d < range * 4.0f && nearestEnemy > range * 1.2f && age >= (uint64_t)C.weaponHeadStartMs &&
                        (C.botSkill != 1 || mania_weapon_ok(w, me, p, range, lane))) {   /* v1.1 Normal: nobody about to hit us */
                 if (d + range * 2.0f < gBest) { gBest = d + range * 2.0f; goal = p; gKind = PK_WEAPON; }
             }
@@ -1809,7 +1867,7 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
         } else b->pickNearAt = 0;
         if (goal) {
             if (goal->addr != b->goalPick) { b->goalPick = goal->addr; b->goalTries = 0; b->goalSince = now; b->goalKind = gKind; }
-            if (gKind == PK_FOOD || gKind == PK_GRENADE) { s_walkLo = camLo; s_walkHi = camHi; }
+            if (gKind == PK_FOOD || gKind == PK_GRENADE || (C.botSkill == 1 && gKind == PK_STAR)) { s_walkLo = camLo; s_walkHi = camHi; }
             if (now - b->goalSince > 6000 || b->goalTries >= 3) { bad_pick(b, goal->addr, now); b->goalPick = 0; LOGD("%s: giving up on a pickup for 8 s", b->name); }
             else {
                 float dx = goal->pos.x - me->pos.x, dz = goal->pos.z - me->pos.z;
@@ -1817,6 +1875,7 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
                 set_mode(b, M_PICKUP, now, gName);
                 if (fabsf_(dx) > range * 0.25f || fabsf_(dz) > lane * 0.5f) {
                     walk_to(b, me, goal->pos.x, goal->pos.z, range * 0.15f, lane * 0.35f, o);
+                    if (b->wdGaveAt == now) { bad_pick(b, goal->addr, now); b->goalPick = 0; }   /* v1.3: the watchdog gave up on it */
                     WHY("going for %s at dx %.1f dz %.1f", gName, dx, dz); return;
                 }
                 if (now - b->lastPickPress > 600) {
@@ -2394,15 +2453,19 @@ static void fight(BotBrain *b, BotBrain *all, int nall, const World *w, const Ch
             n = 4; jc = 1; used_jump(b, 34, now);
             note(b, D_JCCOMBO, "X x4, jump cancel, air down+X, air X on uid %u", tgt->uid);
         }
-        seq_go(b, jc ? 34 : 26, side, 1, stp, k, now);
+        /* v1.3 Normal: varied / longer strings (Easy: always the plain string above) */
+        int var = 0; uint64_t varMs = 0;
+        if (C.botSkill == 1 && !jc && !shFront && !me->heldAddr && n >= 2 && n <= 5)
+            var = mania_vary_string(b, pf, me, tgt, stp, &k, n, per, side, shieldUp, nearCount, nearBehind, lifePct, banked, now, &varMs);
+        seq_go(b, jc ? 34 : var > 1 ? 27 : 26, side, 1, stp, k, now);
         uint64_t pause = (uint64_t)C.comboPauseMs * (b->aggression == 0 ? 16 : b->aggression == 2 ? 6 : 10) / 10;
-        b->comboEnd = now + (uint64_t)n * per + (jc ? 880u : 0u); b->nextComboAt = b->comboEnd + pause; b->wantJuggle = !jc; b->comboCount++;
+        b->comboEnd = now + (var ? varMs : (uint64_t)n * per + (jc ? 880u : 0u)); b->nextComboAt = b->comboEnd + pause; b->wantJuggle = !jc && var <= 2; b->comboCount++;
         /* m5: score comes from long chains: if the target is still reeling, follow up at once instead of pausing */
         if (shieldCop && !incoming) {     /* m6.7: keep pressing: chained strings into the shield, from behind, or once it broke */
             b->nextComboAt = b->comboEnd + 80;
             if (state_is_hurt(tgt->state)) note(b, D_CHAIN, "uid %u (shield cop) reeling: follow-up string", tgt->uid);
         } else if (state_is_hurt(tgt->state) && tgt->hitStun > 0 && !incoming && nearBehind == 0) { b->nextComboAt = b->comboEnd + 60; note(b, D_CHAIN, "uid %u still reeling (stun %d): follow-up string", tgt->uid, tgt->hitStun); }
-        note(b, D_COMBO, "%d-hit string on uid %u", n, tgt->uid);
+        if (!var || var == 1) note(b, D_COMBO, "%d-hit string on uid %u", n, tgt->uid);
         seq_run(b, now, o);
     }
     /* adapt: two strings without the target ever reacting -> we are probably out of reach */

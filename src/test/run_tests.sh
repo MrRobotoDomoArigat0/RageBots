@@ -1,7 +1,7 @@
 #!/bin/sh
 # Offline tests (no game files, no game logs needed).
 #   brain_test : the bot brain on hand-made game snapshots (combat, pickups, traps, robot legs, ...)
-#   mania_test : Bot skill: Easy = the v1.0 brain, Normal behaviors incl. v1.2 Survival perks / star saving (hand-made snapshots)
+#   mania_test : Bot skill: Easy = the v1.0 brain, Normal behaviors incl. v1.2 Survival perks / star saving, v1.3 varied strings / stars / stuck-on-walls watchdog (hand-made snapshots)
 #   menu_test  : the F7 menu model and overlay drawing
 #   pads_test  : v1.2 pad dedupe (Steam Deck / Steam Input / a pad seen through two SDL drivers)
 #   fs_test    : ForceBorderless (needs SDL2_REAL like test_host2, and a display)

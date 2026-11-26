@@ -54,12 +54,13 @@ enum { D_COMBO, D_LAUNCHER, D_BLITZ, D_BACKATTACK, D_GRABTRY, D_GRAB, D_GRABHIT,
        D_FOOD, D_FOODLEFT, D_WEAPONPICK, D_WEAPONTHROW, D_GRENADEBACK, D_GRENADEAVOID,
        D_RUN, D_DASH, D_POGO, D_JUGGLE, D_PULL, D_DOUBLEGRAB, D_STUNGRENADE, D_RETREAT,
        D_UNREACHABLE, D_DETOUR, D_SHIELDFLANK, D_SHIELDGRAB, D_JUMPATTACK, D_BREAK, D_MONEY, D_CHAIN,
-       D_JUMPIN, D_AIRATTACK, D_JCCOMBO, D_AIRSPECIAL, D_CROWDKICK, D_ANTIAIR, D_YIELD, D_BREAKALIGN, D_BREAKMISS, D_FOODSHARE, D_SPREAD, D_WAITDOWN, D_SLAMEVADE, D_SHIELDTAC, D_TRAP, D_CAGED, D_BARREL, D_OFFFLOOR, D_ROBOTPART, D_PARTEVADE, D_RETALIATE,
+       D_JUMPIN, D_AIRATTACK, D_JCCOMBO, D_AIRSPECIAL, D_CROWDKICK, D_ANTIAIR, D_YIELD, D_BREAKALIGN, D_BREAKMISS, D_FOODSHARE, D_SPREAD, D_WAITDOWN, D_SLAMEVADE, D_SHIELDTAC, D_TRAP, D_CAGED, D_BARREL, D_OFFFLOOR, D_ROBOTPART, D_PARTEVADE, D_RETALIATE, D_WALLSTUCK,
        /* v1.1 Normal skill only (internal name Mania; never counted with BotSkill=0) */
        D_M_REPOS, D_M_WALL, D_M_FOLLOWUP, D_M_STEPAWAY, D_M_PANIC, D_M_ROWDODGE, D_M_GU, D_M_GUCATCH, D_M_THROW, D_M_SMASH, D_M_PUSH, D_M_DIVE,
        D_M_HEAVYLANE, D_M_OBJROW, D_M_DIAG, D_M_BAIT, D_M_LOWLIFE, D_M_UNSTACK,   /* v1.1 stage 3 */
        D_M_FWDSP, D_M_LEAP, D_M_PIPE, D_M_TRAPSRC, D_M_PICKTRAP, D_M_GREEN,   /* v1.1 stage 4 */
-       D_M_PERK, D_M_PORTAL, D_M_STARSAVE, D_COUNT };   /* v1.2 Survival */
+       D_M_PERK, D_M_PORTAL, D_M_STARSAVE,   /* v1.2 Survival */
+       D_M_VARIED, D_COUNT };   /* v1.3 Normal: varied / longer strings */
 extern const char *const k_dec_names[D_COUNT];
 
 /* m3: driving the character select with the bot's own pad, one visit at a time */
@@ -113,6 +114,8 @@ typedef struct {
     int breakSide, breakFails; float breakLife, breakStand; uint64_t breakSwingSince, breakAlignSince;
     float breakZOff, breakZPrev; uint64_t breakStart, breakZAt, breakLastTick, breakNudgeUntil, breakLastHit; int breakInPos, breakZBlocked;   /* m6.1 */
     uint64_t fightTick;
+    /* v1.3: stuck-on-walls watchdog in walk_to (every mode but the approach, which has its own) */
+    uint64_t wdTick, wdAt, wdUntil, wdGiveUntil, wdGaveAt; float wdX, wdZ, wdGiveX, wdGiveZ; int wdStage, wdSide;
     float breakXPrev; uint64_t breakXAt;   /* m6.3 */
     float breakZLim;   /* m6.5: the reachable depth when blocked (back wall) */
     int wlx; uint64_t wlxAt; uint32_t sideUid; int sideK; uint64_t sideAt; int waitArrived; uint32_t closeOkUid; uint64_t closeOkUntil;   /* m6.7 anti-jitter */
@@ -159,6 +162,7 @@ typedef struct {
     /* m7.2: melee weapon throws */
     uint32_t barrelSkipUid, barrelSeen[8]; int nBarrelSeen;   /* m7.2/m7.3 */
     uint64_t lastMeleeThrowAt, meleeNearAt; int heldKnifeOk, throwsDone; uint32_t rng;   /* m7.3 */
+    int grabKneeMax, varLast; uint64_t lastVarSpecial, lastVarBlitz;   /* v1.3 Normal: knees per grab (1-3), last string variant, cooldowns */
     uint64_t fightSince, fightLastAt;   /* m7.2: first frame of the current run of fight() frames */
     uint64_t cagedNoteAt; int cagedN; uint32_t cagedSum;   /* m7.2: not-yet-released enemies */
     uint64_t heldSince, heldLastSwingAt, wtNoteAt; int heldSwings, heldDurOk, wtNoteKind; float heldLastLife, heldLastDrop;

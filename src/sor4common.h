@@ -31,7 +31,8 @@ typedef struct {
     int defSpecialMinLifePct, starButton, starMode;       /* starMode 0 = auto (game's control option), 1 = StarButton, 2 = Y+B */
     int backAttack;                                       /* 0 off, 1 RT, 2 back+X */
     int useStars, usePickups, useGrabs, foodLifePct;
-    int itemHeadStartMs, breakObjects;   /* m5: PlayerItemHeadStartSec, BreakObjects */
+    int itemHeadStartMs, breakObjects;   /* m5: PlayerItemHeadStartSec (v1.3: money and stars, default 7), BreakObjects */
+    int weaponHeadStartMs;               /* v1.3: WeaponHeadStartSec (weapons keep the old 10 s default) */
     int jumpAttacks;                     /* m6: JumpAttacks (jump-ins, air hits, jump-cancel combos, air special) */
     int friendlyRetaliate;               /* m7.4: FriendlyRetaliate (friendly fire on: a bot hits a human back once per hit taken) */
     int weaponThrows;                    /* m7.2: WeaponThrows (throw held melee weapons at range / before they break) */

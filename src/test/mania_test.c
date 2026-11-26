@@ -73,9 +73,16 @@ static Chr *g_me;
 static void take_on_b(int fr) { (void)fr; if (out.btn[BTN_B] && w.npk) { w.npk = 0; g_me->heldAddr = 0x2000; } }
 static void wt_gone(int fr) { (void)fr; if (out.btn[BTN_B] && out.axis[AX_LX] > 16000) w.ch[1].heldAddr = 0; }   /* m7.2: the thrown weapon leaves our hand */
 static int g_p1dx = 0; static void move_me_toward_stick(int fr);
+static void mv_take(int fr) { move_me_toward_stick(fr); take_on_b(fr); }   /* v1.3 */
 /* m7.3: the far target keeps its distance (5 ahead), P1 moves along (g_p1dx ahead, 0 = stays) */
 static void wt_keep5(int fr) { move_me_toward_stick(fr); w.ch[1].pos.z = 1.5f; w.ch[2].pos.x = w.ch[1].pos.x + 5.0f; if (g_p1dx) w.ch[0].pos.x = w.ch[1].pos.x + g_p1dx * 0.5f; }
 static void move_me_toward_stick(int fr) { (void)fr; g_me->pos.x += out.axis[AX_LX] / 32767.0f * 0.08f; g_me->pos.z += out.axis[AX_LY] / 32767.0f * 0.04f; }
+/* v1.3: stuck-on-walls watchdog: an invisible wall at x = g_wallX (nothing passes left of it); depth steps, hops, idle frames */
+static float g_wallX = -1e9f; static int g_wdStep, g_wdNeutral, g_wdLate;
+static void mv_wall(int fr) { move_me_toward_stick(fr); if (g_me->pos.x < g_wallX) g_me->pos.x = g_wallX;
+    if (out.axis[AX_LX] && out.axis[AX_LY] && bb[0].wdStage == 1) g_wdStep++;
+    if (!out.axis[AX_LX] && !out.axis[AX_LY]) g_wdNeutral++; }
+static void frozen(int fr) { (void)fr; if (out.axis[AX_LX] < 0) g_wdLate++; }
 static int g_pinZ, g_brkAirX, g_brkLastX;
 static void move_brk_check(int fr) {
     (void)fr;
@@ -100,7 +107,7 @@ int main(void) {
     C.specialMinLifePct = 60; C.defSpecialMinLifePct = 40; C.retreatLifePct = 30; C.retreatMaxMs = 2500; C.comboHits = 4; C.comboTapMs = 110; C.comboPauseMs = 350;
     C.joinButton = BTN_A; C.joinPresses = 2; C.focusGraceMs = 0; C.resumeGraceMs = 0; C.starButton = BTN_RB; C.starMode = 0; C.backAttack = 1;
     C.useStars = 1; C.usePickups = 1; C.useGrabs = 1; C.foodLifePct = 75; C.brainLogMs = 0;
-    C.itemHeadStartMs = 0; C.breakObjects = 1; C.jumpAttacks = 1; C.weaponThrows = 1;
+    C.itemHeadStartMs = 0; C.weaponHeadStartMs = 0; C.breakObjects = 1; C.jumpAttacks = 1; C.weaponThrows = 1;
     brain_set_focus(1, 0);
     if (getenv("MT_LOG")) { g_quiet = 0; C.logLevel = LV_DEBUG; C.brainLogMs = 160; }
     Tally t;
@@ -547,6 +554,60 @@ int main(void) {
         run(120, &t, move_me_toward_stick);
         if (sk) CHECK(t.btn[BTN_B] >= 1 && dec(D_FOOD) >= 1, "%s: 2 apples, P1 85%%, bot 81%%: Normal eats one (B %d, food %d)", S, t.btn[BTN_B], dec(D_FOOD));
         else CHECK(t.btn[BTN_B] == 0 && dec(D_FOOD) == 0, "%s: Easy 81%% life (>75%%): food left alone (B %d)", S, t.btn[BTN_B]);
+
+        /* 30a. v1.3: 20 s against one standing enemy: Normal mixes varied / longer strings in, Easy never does */
+        world_reset(); bot_reset(1); g_me = me = &w.ch[1]; me->pos.x = 0.0f; me->pos.z = 1.5f; me->life = 100;
+        mk(2, 160, 1, -1, 0.9f, 1.5f, -1, CS_STANDHIT); w.ch[2].cantBeGrabbed = 1;
+        run(60 * 20, &t, NULL);
+        if (sk) CHECK(dec(D_M_VARIED) >= 3 && dec(D_COMBO) >= 2 && t.btn[BTN_X] >= 30, "%s: 20 s on one enemy: varied strings %d, plain strings %d, X %d", S, dec(D_M_VARIED), dec(D_COMBO), t.btn[BTN_X]);
+        else CHECK(dec(D_M_VARIED) == 0 && dec(D_COMBO) >= 5 && !mania_any(), "%s: 20 s on one enemy: plain strings only (%d), varied %d", S, dec(D_COMBO), dec(D_M_VARIED));
+        /* 30b. v1.3: a star 1.2 away, a knocked-down enemy 1.5 away (inside the old 1.5-range enemy gate), 7 s head start:
+           Normal takes it after 7 s (not before); Easy keeps the old money rule, only the 7 s timer */
+        world_reset(); bot_reset(1); g_me = me = &w.ch[1]; me->pos.x = 0.0f; me->pos.z = 1.5f; C.itemHeadStartMs = 7000;
+        mk(2, 161, 1, -1, -1.5f, 1.5f, 1, CS_ONGROUND);   /* knocked down next to us: still counts as near */
+        w.npk = 1; w.pk[0].addr = 0x5100; w.pk[0].kind = PK_STAR; w.pk[0].starGain = 1; w.pk[0].life = 1; w.pk[0].pos.x = 1.2f; w.pk[0].pos.z = 1.5f;
+        run(60 * 6, &t, mv_take);
+        { int bEarly = 0; for (int i = 0; i < 1; i++) bEarly = t.btn[BTN_B];
+          w.ch[1].pos.x = 0.0f; w.ch[2].pos.x = -1.5f;
+          run(60 * 3, &t, mv_take);
+          if (sk) CHECK(bEarly == 0 && t.btn[BTN_B] >= 1, "%s: star (enemy 1.5 away): B before 7 s %d, after %d", S, bEarly, t.btn[BTN_B]);
+          else CHECK(bEarly == 0, "%s: Easy star: not before the 7 s head start (B %d, then %d with the old money rule)", S, bEarly, t.btn[BTN_B]); }
+        C.itemHeadStartMs = 0;
+        /* 31. v1.3 stuck-on-walls watchdog (both skills: a bug fix). a) following P1 into a wall: depth step, hop, give
+           up for 3 s (stands), no left/right flip-flop; b) the wall goes: walks on, no more stuck notes; c) free walking:
+           never fires; d) food behind a wall: given up and marked bad (not pushed at again); e) standing next to P1 /
+           attacking an enemy with the world frozen: never fires; f) approaching an enemy behind a wall: left to the
+           approach's own stuck logic */
+        world_reset(); bot_reset(1); g_me = me = &w.ch[1]; me->pos.x = 0.0f; w.ch[0].pos.x = -8.0f; g_wallX = -1.0f; g_wdStep = g_wdNeutral = 0;
+        run(60 * 5, &t, mv_wall);
+        { int st = dec(D_WALLSTUCK), hop = t.btn[BTN_A], rv = t.rev, stp = g_wdStep, nt = g_wdNeutral; uint64_t gu = bb[0].wdGiveUntil;
+          CHECK(st >= 1 && stp >= 20 && hop >= 1 && hop <= 2 && gu > 0 && nt >= 60 && rv == 0 && me->pos.x <= -0.99f,
+                "%s: walled in following P1 (5 s): stuck notes %d, depth-step frames %d, hops %d, gave up %d (idle frames %d), x flips %d", S, st, stp, hop, gu > 0, nt, rv);
+          g_wallX = -1e9f; run(60 * 4, &t, move_me_toward_stick);
+          CHECK(dec(D_WALLSTUCK) == st && me->pos.x < -4.0f && t.rev == 0, "%s: wall gone: walked on to x %.1f, new stuck notes %d, x flips %d", S, me->pos.x, dec(D_WALLSTUCK) - st, t.rev); }
+        world_reset(); bot_reset(1); g_me = me = &w.ch[1]; me->pos.x = 0.0f; w.ch[0].pos.x = -8.0f;
+        run(60 * 4, &t, move_me_toward_stick);
+        CHECK(dec(D_WALLSTUCK) == 0 && me->pos.x < -4.0f, "%s: free walk to P1: no stuck note (%d), x %.1f", S, dec(D_WALLSTUCK), me->pos.x);
+        world_reset(); bot_reset(1); g_me = me = &w.ch[1]; me->pos.x = 0.0f; me->life = 40; w.ch[0].pos.x = 1.5f; g_wallX = -1.0f; g_wdStep = g_wdNeutral = 0;
+        w.npk = 1; w.pk[0].addr = 0x4400; w.pk[0].kind = PK_FOOD; w.pk[0].lifeGain = 30; w.pk[0].pos.x = -4.0f; w.pk[0].pos.z = 1.5f;
+        run(60 * 5, &t, mv_wall);
+        { int bad = 0; for (int i = 0; i < 8; i++) if (bb[0].badPick[i] == 0x4400 && bb[0].badPickUntil[i] > now) bad = 1;
+          g_wdLate = 0; run(60 * 2, &t, frozen);
+          CHECK(dec(D_WALLSTUCK) >= 1 && bad && !t.btn[BTN_B] && g_wdLate < 20, "%s: food behind a wall: stuck %d, marked bad %d, then pushed at it %d frames of 120", S, dec(D_WALLSTUCK), bad, g_wdLate); }
+        g_wallX = -1e9f;
+        world_reset(); bot_reset(1); g_me = me = &w.ch[1]; me->pos.x = 0.0f; w.ch[0].pos.x = -3.0f;
+        run(60 * 3, &t, move_me_toward_stick); { float ax = me->pos.x;
+        run(60 * 4, &t, NULL);
+        CHECK(dec(D_WALLSTUCK) == 0 && t.neutralFrames >= 230, "%s: at its spot by P1 (x %.1f; then 4 s frozen): no stuck note (%d), idle frames %d", S, ax, dec(D_WALLSTUCK), t.neutralFrames); }
+        world_reset(); bot_reset(1); g_me = me = &w.ch[1];
+        { Chr *e = mk(2, 170, 1, -1, 0.7f, 1.5f, -1, CS_STANDMOVE); e->cantBeGrabbed = 1; }
+        run(60 * 6, &t, move_me_toward_stick);
+        CHECK(dec(D_WALLSTUCK) == 0 && t.btn[BTN_X] >= 4, "%s: fighting one enemy 6 s: no stuck note (%d), X %d", S, dec(D_WALLSTUCK), t.btn[BTN_X]);
+        world_reset(); bot_reset(1); g_me = me = &w.ch[1]; me->pos.x = 0.0f; g_wallX = -1.0f;
+        mk(2, 171, 1, -1, -5.0f, 1.5f, 1, CS_STANDMOVE);
+        run(60 * 3, &t, mv_wall);
+        CHECK(dec(D_WALLSTUCK) == 0 && dec(D_DETOUR) >= 1, "%s: approaching an enemy behind a wall: approach's own detour %d, watchdog %d", S, dec(D_DETOUR), dec(D_WALLSTUCK));
+        g_wallX = -1e9f;
     }
     C.botSkill = 0;
     printf("%s (%d failure(s))\n", fails ? "FAIL" : "PASS", fails);

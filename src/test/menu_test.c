@@ -40,8 +40,8 @@ int main(int argc, char **argv) {
     snprintf(m.where, sizeof m.where, "character select"); snprintf(m.note[0], sizeof m.note[0], "(playing)");
     char lines[32][96]; int col[32]; int n = menu_lines(&m, lines, col, 32);
     for (int i = 0; i < n; i++) printf("  [%c] %s\n", "TtSg"[col[i]], lines[i]);
-    CHECK(n == 19 && !strcmp(lines[0], "RAGE BOTS v1.2") && col[0] == MC_TITLE && !strcmp(lines[1], "By: MrRobotoDomoArigato") && strstr(lines[2], "F7 close")
-          && !strcmp(lines[3], "Where: character select"), "header (v1.2: RAGE BOTS v1.2 / By: MrRobotoDomoArigato)");
+    CHECK(n == 19 && !strcmp(lines[0], "RAGE BOTS v1.3") && col[0] == MC_TITLE && !strcmp(lines[1], "By: MrRobotoDomoArigato") && strstr(lines[2], "F7 close")
+          && !strcmp(lines[3], "Where: character select"), "header (v1.3: RAGE BOTS v1.3 / By: MrRobotoDomoArigato)");
     CHECK(strstr(lines[5], "P2 bot: ON") && col[6] == MC_SEL && strstr(lines[6], "> Character: Floyd") != NULL, "selected row");
     CHECK(col[10] == MC_GREY && col[11] == MC_GREY, "sub-rows of an OFF bot are grey");
     for (int i = 0; i < n; i++) CHECK(!strstr(lines[i], "alette"), "the word Color, never Palette");

@@ -17,11 +17,26 @@ know where everyone is and how much life they have.
 
 ## Download
 
-Get the ready-made zip (`RageBots-v1.2.zip`) from the **Releases** page of this repository. It contains the built
+Get the ready-made zip (`RageBots-v1.3.zip`) from the **Releases** page of this repository. It contains the built
 `SDL2.dll`, the official `SDL2_real.dll`, the default `SoR4Bots.ini` and a plain-text README. You only need to
 build from source if you want to change the mod.
 
-## What's new in v1.2
+## What's new in v1.3
+
+- **Stuck on walls fix (Easy and Normal):** a general watchdog in the walking code. When a bot holds a direction but
+  hasn't moved for 0.9 s it steps 1.5 lanes in depth, then hops, then gives that goal up for 3 s (an item it can't
+  reach is marked bad and left alone). Covers following P1, retreating, pickups, Survival perks and the portal;
+  approaching an enemy keeps its own detour/hop/unreachable logic. Never acts while standing still, attacking,
+  grabbing, held, hurt, airborne or scripted.
+- **Low life:** `RetreatLifePercent` now defaults to 0 (no backing off). Set 30 for the old behaviour.
+- **Normal: varied combos.** Plain strings mixed at random with longer strings, back attacks, jump kicks, blitz,
+  specials and two hits into a grab (never the same fancy finisher twice in a row); grabs use 1-3 knees.
+- **Normal: star pickups** after the head start when no enemy is close (or the star is nearer than any enemy and no
+  attack is coming), ranked like food.
+- **Shorter waits:** `PlayerItemHeadStartSec` 7 (was 10) for money and stars, `PerkWaitSeconds` 7 (was 10), and a
+  new `WeaponHeadStartSec` (default 10) for weapons.
+
+## What was new in v1.2
 
 - **Survival perks (Normal):** the bots wait `PerkWaitSeconds` (10) for a player to pick a perk; if nobody does,
   one bot takes a perk it doesn't own yet, taking turns by round (P2, P3, P4, skipping a bot that is down). Never
@@ -65,7 +80,8 @@ jump-slam landing boxes, dodge thrown/flying objects by direction; floor traps l
   picked and confirms once.
 - **Combat:** lines up and faces enemies, per-fighter combo strings, launchers and follow-ups, back attacks,
   grabs and throws, jump attacks, specials with care for the life bar, defensive specials and dodges, star moves
-  near bosses, in big crowds or in an emergency. Backs off behind player 1 when life is low.
+  near bosses, in big crowds or in an emergency. Backs off behind player 1 when life is low (only if
+  `RetreatLifePercent` is set; off by default).
 - **Bot skill:** Easy (the v1.0 bots) or Normal (the smarter bots, with Survival perk handling in v1.2), switched in the F7 menu.
 - **Pickups and weapons:** food (left for player 1 if you need it more), money, weapons and grenades, with a head
   start for players. Melee weapons are mostly swung and only thrown when worn out or the enemy is far away.
@@ -169,7 +185,7 @@ x86_64-w64-mingw32-gcc -O2 -Wall -Wextra -Wno-unused-parameter -shared -s \
     -lkernel32 -luser32 -lgdi32
 ```
 
-A clean build from this source with the toolchain above gives an `SDL2.dll` that is identical to the v1.2 release
+A clean build from this source with the toolchain above gives an `SDL2.dll` that is identical to the v1.3 release
 DLL except for the 4-byte link timestamp in the PE header.
 
 To run it you also need `SDL2_real.dll`: download `SDL2-2.32.10-win32-x64.zip` from the SDL GitHub releases
